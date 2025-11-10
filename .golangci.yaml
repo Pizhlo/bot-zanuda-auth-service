@@ -1,0 +1,127 @@
+version: "2"  # схема конфигурации golangci-lint
+
+run:
+  # Общие настройки запуска golangci-lint
+  timeout: 5m               # общий таймаут
+  tests: true               # анализировать тестовые файлы
+  modules-download-mode: readonly
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+linters:
+  enable:
+    # Core correctness and static analysis
+    - govet
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - unused
+    - gochecknoglobals
+
+    # Style/maintainability
+    - revive
+    - gocritic
+    - misspell
+    - goconst
+    - prealloc
+    - unparam
+    - dupword
+    - nilerr
+    - dogsled
+    - godot
+
+    # Тесты
+    - paralleltest   # требует t.Parallel() в тестах
+    - thelper        # требует вызов t.Helper() в помощниках
+    - contextcheck
+
+    # Сложность и длина
+    - funlen         # длина функции
+    - gocognit       # когнитивная сложность
+    - cyclop         # цикломатическая сложность (дополняет gocognit)
+    - dupl           # поиск дубликатов кода
+
+    # Безопасность ресурсов/закрытий
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - noctx
+
+    # Оформление пробелами и пустыми строками
+    - wsl_v5            # контроль "cuddling" и пустых строк вокруг return/continue
+
+    # Безопасность и политика
+    - gosec          # базовые проверки безопасности
+    - forbidigo      # запрет отдельных вызовов/идентификаторов
+    - nolintlint     # корректность использования //nolint
+
+  settings:
+    # Набор проверок стиля/качества кода от revive
+    revive:
+      rules:
+        - name: early-return   # поощряет ранние возвраты, меньше вложенности
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: var-naming
+        - name: error-naming
+        - name: exported
+        - name: redundant-import-alias
+        - name: time-naming
+        - name: receiver-naming
+        - name: blank-imports
+        - name: unnecessary-stmt
+
+    # Линтер пробелов/пустых строк: требуем аккуратную раскладку и "err cuddling"
+    wsl:
+      # Требуем привязку обработки err к месту получения и строгую раскладку
+      force-err-cuddling: true
+      allow-cuddle-declarations: false
+      allow-assign-and-call: false
+      strict-append: true
+
+    # Ограничение длины функций
+    funlen:
+      lines: 60          # макс. строк в функции
+      statements: 40     # макс. операторов в функции
+      ignore-comments: true
+
+    # Порог когнитивной сложности (ниже — строже)
+    gocognit:
+      min-complexity: 15
+
+    # Порог цикломатической сложности
+    cyclop:
+      max-complexity: 12
+      package-average: 0.0
+
+    # Требование параллельных тестов
+    paralleltest:
+      ignore-missing: false
+
+    # Опечатки на английском
+    misspell:
+      locale: US
+
+    # Порог похожести для поиска дубликатов
+    dupl:
+      threshold: 90
+
+    # Строгая проверка комментариев //nolint
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+    # Базовые проверки безопасности
+    gosec:
+      severity: medium
+      confidence: medium
+      excludes:
+        - G115   # ложные срабатывания на преобразования целых, часто в тестах/утилитах
+
+  exclusions:
+    paths: # исключить swagger документацию
+      - "./docs/*" 
+
+
