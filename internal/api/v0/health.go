@@ -1,0 +1,24 @@
+package v0
+
+import (
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+)
+
+// Health необходим для проверки работоспособности сервера.
+// Всегда отвечает 200 ОК
+//
+// Health godoc
+//
+//	@Summary		Проверить состояние сервера и соединения
+//	@Description	Проверить состояние сервера и соединения
+//	@Success		200
+//	@Router			/health [get]
+func (s *Handler) Health(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"version":   s.version,
+		"buildDate": s.buildDate,
+		"gitCommit": s.gitCommit,
+	})
+}

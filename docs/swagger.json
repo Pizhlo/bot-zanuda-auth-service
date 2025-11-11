@@ -1,0 +1,24 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "API для работы с авторизацией",
+        "title": "Auth Service API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api/v0",
+    "paths": {
+        "/health": {
+            "get": {
+                "description": "Проверить состояние сервера и соединения",
+                "summary": "Проверить состояние сервера и соединения",
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                }
+            }
+        }
+    }
+}

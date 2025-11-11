@@ -1,0 +1,16 @@
+basePath: /api/v0
+host: localhost:8080
+info:
+  contact: {}
+  description: API для работы с авторизацией
+  title: Auth Service API
+  version: "1.0"
+paths:
+  /health:
+    get:
+      description: Проверить состояние сервера и соединения
+      responses:
+        "200":
+          description: OK
+      summary: Проверить состояние сервера и соединения
+swagger: "2.0"

@@ -1,0 +1,5 @@
+log_level: "test"
+
+server:
+  port: 8080
+  shutdown_timeout: 100ms
