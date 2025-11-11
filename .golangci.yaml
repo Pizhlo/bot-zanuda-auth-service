@@ -113,6 +113,11 @@ linters:
       require-explanation: true
       require-specific: true
 
+    # Проверки качества кода от gocritic
+    gocritic:
+      enabled-checks:
+        - commentedOutCode  # запрещает закомментированный код
+
     # Базовые проверки безопасности
     gosec:
       severity: medium
