@@ -5,6 +5,7 @@ import (
 	handlerV0 "auth-service/internal/api/v0"
 	"auth-service/internal/config"
 	"auth-service/internal/server"
+	"auth-service/internal/storage/vault"
 	"context"
 	"flag"
 	"fmt"
@@ -63,6 +64,14 @@ func main() {
 		return server.Start(notifyCtx)
 	})
 
+	vaultClient := initVaultClient(config.Vault)
+
+	if err := vaultClient.Connect(); err != nil {
+		logrus.WithError(err).Fatal("failed to connect to vault")
+	}
+
+	defer butler.stop(ctx, vaultClient)
+
 	logrus.Info("all services started")
 
 	// Ждем сигнал завершения
@@ -102,6 +111,30 @@ func initServer(handlerV0 *handlerV0.Handler, cfg config.Server) *server.Server 
 			server.WithPort(cfg.Port),
 			server.WithShutdownTimeout(cfg.ShutdownTimeout),
 		),
+	)
+}
+
+func initVaultClient(cfg config.Vault) *vault.Client {
+	logrus.WithFields(logrus.Fields{
+		"address":           cfg.Address,
+		"insecure_skip_tls": cfg.InsecureSkipTLS,
+	}).Info("initializing vault client")
+
+	opts := []vault.ClientOption{
+		vault.WithAddress(cfg.Address),
+		vault.WithToken(cfg.Token),
+	}
+
+	if cfg.InsecureSkipTLS {
+		opts = append(opts, vault.WithInsecureSkipTLS(true))
+	}
+
+	if cfg.CAPath != "" || cfg.ClientCertPath != "" || cfg.ClientKeyPath != "" {
+		opts = append(opts, vault.WithTLSConfig(cfg.CAPath, cfg.ClientCertPath, cfg.ClientKeyPath))
+	}
+
+	return start(
+		vault.NewClient(opts...),
 	)
 }
 

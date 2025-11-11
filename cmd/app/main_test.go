@@ -73,3 +73,16 @@ func TestUpdateSwaggerHost(t *testing.T) {
 		})
 	}
 }
+
+func TestInitVaultClient(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Vault{
+		Address: "https://localhost:8200",
+		Token:   "vault-token",
+		CAPath:  "/path/to/ca.pem",
+	}
+
+	vaultClient := initVaultClient(cfg)
+	require.NotNil(t, vaultClient)
+}

@@ -19,6 +19,106 @@ swag:
 init:
 	@echo "> initializing..."
 	@make install-linters
+	@make certs
+
+certs:
+	@echo "> generating certs..."
+	@mkdir -p vault
+	@if [ -f vault/ca.crt ] || [ -f vault/private-key.pem ] || [ -f vault/full-chain.pem ]; then \
+		echo "Error: Certificate files already exist. Remove them manually or use 'make clean-certs' to regenerate."; \
+		exit 1; \
+	fi
+	@make _generate-ca-cert
+	@make _generate-server-cert
+	@make _generate-client-cert
+	@make _cleanup-temp-files
+	@echo "> certs generated successfully"
+
+_generate-ca-cert:
+	@echo "  > generating CA certificate..."
+	@printf '%s\n' \
+		'[req]' \
+		'distinguished_name = req_distinguished_name' \
+		'x509_extensions = v3_ca' \
+		'prompt = no' \
+		'' \
+		'[req_distinguished_name]' \
+		'C = RU' \
+		'ST = State' \
+		'L = City' \
+		'O = Organization' \
+		'CN = Vault CA' \
+		'' \
+		'[v3_ca]' \
+		'basicConstraints = critical,CA:true' \
+		'keyUsage = critical, keyCertSign, cRLSign' > vault/ca.conf
+	@openssl req -x509 -newkey rsa:4096 -keyout vault/ca.key -out vault/ca.crt \
+		-days 365 -nodes -config vault/ca.conf -extensions v3_ca
+
+_generate-server-cert:
+	@echo "  > generating server certificate..."
+	@printf '%s\n' \
+		'[req]' \
+		'distinguished_name = req_distinguished_name' \
+		'req_extensions = v3_req' \
+		'prompt = no' \
+		'' \
+		'[req_distinguished_name]' \
+		'C = RU' \
+		'ST = State' \
+		'L = City' \
+		'O = Organization' \
+		'CN = localhost' \
+		'' \
+		'[v3_req]' \
+		'keyUsage = critical, digitalSignature, keyEncipherment' \
+		'extendedKeyUsage = serverAuth' \
+		'subjectAltName = @alt_names' \
+		'' \
+		'[alt_names]' \
+		'DNS.1 = localhost' \
+		'DNS.2 = *.localhost' \
+		'IP.1 = 127.0.0.1' \
+		'IP.2 = ::1' > vault/server.conf
+	@openssl req -newkey rsa:4096 -keyout vault/private-key.pem -out vault/server.csr \
+		-nodes -config vault/server.conf
+	@openssl x509 -req -in vault/server.csr -CA vault/ca.crt -CAkey vault/ca.key \
+		-CAcreateserial -out vault/full-chain.pem -days 365 \
+		-extensions v3_req -extfile vault/server.conf
+
+_generate-client-cert:
+	@echo "  > generating client certificate..."
+	@printf '%s\n' \
+		'[req]' \
+		'distinguished_name = req_distinguished_name' \
+		'req_extensions = v3_req' \
+		'prompt = no' \
+		'' \
+		'[req_distinguished_name]' \
+		'C = RU' \
+		'ST = State' \
+		'L = City' \
+		'O = Organization' \
+		'CN = vault-client' \
+		'' \
+		'[v3_req]' \
+		'keyUsage = critical, digitalSignature, keyEncipherment' \
+		'extendedKeyUsage = clientAuth' \
+		'subjectAltName = @alt_names' \
+		'' \
+		'[alt_names]' \
+		'DNS.1 = localhost' \
+		'IP.1 = 127.0.0.1' > vault/client.conf
+	@openssl req -newkey rsa:4096 -keyout vault/client.key -out vault/client.csr \
+		-nodes -config vault/client.conf
+	@openssl x509 -req -in vault/client.csr -CA vault/ca.crt -CAkey vault/ca.key \
+		-CAcreateserial -out vault/client.crt -days 365 \
+		-extensions v3_req -extfile vault/client.conf
+
+_cleanup-temp-files:
+	@echo "  > cleaning up temporary files..."
+	@rm -f vault/ca.conf vault/server.conf vault/client.conf \
+		vault/server.csr vault/client.csr vault/ca.key vault/ca.srl
 
 install-linters:
 	@echo "> installing linters..."
@@ -79,9 +179,25 @@ build:
 	-o "$(BUILD_DIR)/bin/" ./cmd/...
 	@echo " > successfully built"
 
-
 run:
 	@make build
 	$(APP_EXECUTABLE_DIR)/app
 
-.PHONY: mocks swag lint test all run init install-linters check check-go-mod
+start-vault:
+	@echo "> starting vault..."
+	docker-compose up -d vault
+	@echo "> vault started successfully"
+	docker logs auth-service-vault
+
+stop-vault:
+	@echo "> stopping vault..."
+	docker-compose stop vault
+	@echo "> vault stopped successfully"
+
+restart-vault:
+	@echo "> restarting vault..."
+	@make stop-vault
+	@make start-vault
+	@echo "> vault restarted successfully"
+
+.PHONY: mocks swag lint test all run init install-linters check check-go-mod start-vault stop-vault restart-vault certs
