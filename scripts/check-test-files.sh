@@ -19,6 +19,10 @@ for dir in $*; do
   if [[ "${dir}" == */mocks ]] || [[ "${dir}" == */mocks/* ]]; then
     continue
   fi
+  # Пропускаем директории с документацией
+  if [[ "${dir}" == */docs ]] || [[ "${dir}" == */docs/* ]]; then
+    continue
+  fi
   ((total_pkgs+=1))
   mainFile=$(find "${dir}" -maxdepth 1 -name 'main.go')
   testFiles=$(find "${dir}" -maxdepth 1 -name '*_test.go')
