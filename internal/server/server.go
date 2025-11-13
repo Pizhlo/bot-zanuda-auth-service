@@ -164,5 +164,10 @@ func (s *Server) createRoutes() error {
 		return errors.New("no routes initialized")
 	}
 
+	logrus.WithFields(logrus.Fields{
+		"routes": len(s.e.Routes()),
+		"port":   s.port,
+	}).Info("routes initialized")
+
 	return nil
 }

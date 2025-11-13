@@ -3,3 +3,13 @@ log_level: "debug"
 server:
   port: 8080
   shutdown_timeout: 100ms
+
+vault:
+  address: "https://localhost:8200"
+  token: "vault-token"
+  # Для разработки: пропускать проверку TLS сертификата
+  insecure_skip_tls: true
+  # Для production с использованием сертификатов (сгенерированных через make certs):
+  # ca_path: "./vault/ca.crt"
+  # client_cert_path: "./vault/client.crt"
+  # client_key_path: "./vault/client.key"

@@ -1,0 +1,24 @@
+services:
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: auth-service-vault
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    environment:
+      - VAULT_ADDR=${VAULT_ADDR}
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/config.yaml:/vault/config/vault.yaml:ro
+      - ./vault/full-chain.pem:/vault/config/full-chain.pem:ro
+      - ./vault/private-key.pem:/vault/config/private-key.pem:ro
+    cap_add:
+      - IPC_LOCK
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /vault/data
+        exec vault server -config=/vault/config/vault.yaml
+
+volumes:
+  vault_data:

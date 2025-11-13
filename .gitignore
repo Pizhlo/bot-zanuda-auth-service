@@ -1,3 +1,7 @@
 *.yaml
 .vscode
 .build
+.env
+*.pem
+*.key
+*.crt

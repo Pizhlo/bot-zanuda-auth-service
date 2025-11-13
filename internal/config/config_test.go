@@ -26,6 +26,10 @@ func TestLoadConfig(t *testing.T) {
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
+				Vault: Vault{
+					Address: "https://localhost:8200",
+					Token:   "vault-token",
+				},
 			},
 			wantErr: require.NoError,
 		},

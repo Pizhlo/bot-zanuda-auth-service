@@ -3,3 +3,7 @@ log_level: "debug"
 server:
   port: 8080
   shutdown_timeout: 100ms
+
+vault:
+  address: "https://localhost:8200"
+  token: "vault-token"
