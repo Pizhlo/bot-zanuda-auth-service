@@ -20,5 +20,15 @@ services:
         mkdir -p /vault/data
         exec vault server -config=/vault/config/vault.yaml
 
+  redis:
+    image: "redis:alpine"
+    container_name: auth-service-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
 volumes:
   vault_data:
+  redis-data:

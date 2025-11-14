@@ -7,3 +7,8 @@ server:
 vault:
   address: "https://localhost:8200"
   token: "vault-token"
+
+redis:
+  type: "single"
+  host: "localhost"
+  port: 6379

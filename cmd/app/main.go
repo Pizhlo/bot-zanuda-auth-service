@@ -5,6 +5,7 @@ import (
 	handlerV0 "auth-service/internal/api/v0"
 	"auth-service/internal/config"
 	"auth-service/internal/server"
+	"auth-service/internal/service/redis"
 	"auth-service/internal/storage/vault"
 	"context"
 	"flag"
@@ -72,6 +73,9 @@ func main() {
 
 	defer butler.stop(ctx, vaultClient)
 
+	redis := initRedisStorage(ctx, config.Redis)
+	defer butler.stop(ctx, redis)
+
 	logrus.Info("all services started")
 
 	// Ждем сигнал завершения
@@ -136,6 +140,14 @@ func initVaultClient(cfg config.Vault) *vault.Client {
 	return start(
 		vault.NewClient(opts...),
 	)
+}
+
+func initRedisStorage(ctx context.Context, cfg config.Redis) *redis.Service {
+	redis := start(redis.New(redis.WithCfg(&cfg)))
+
+	startService(redis.Connect(ctx), "redis connect")
+
+	return redis
 }
 
 func startService(err error, name string) {
