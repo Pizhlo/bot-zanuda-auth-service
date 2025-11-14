@@ -183,6 +183,9 @@ run:
 	@make build
 	$(APP_EXECUTABLE_DIR)/app
 
+# DOCKER
+
+# VAULT
 start-vault:
 	@echo "> starting vault..."
 	docker-compose up -d vault
@@ -200,4 +203,22 @@ restart-vault:
 	@make start-vault
 	@echo "> vault restarted successfully"
 
-.PHONY: mocks swag lint test all run init install-linters check check-go-mod start-vault stop-vault restart-vault certs
+# REDIS
+start-redis:
+	@echo "> starting redis..."
+	docker-compose up -d redis
+	@echo "> redis started successfully"
+	docker logs auth-service-redis
+
+stop-redis:
+	@echo "> stopping redis..."
+	docker-compose stop redis
+	@echo "> redis stopped successfully"
+
+restart-redis:
+	@echo "> restarting redis..."
+	@make stop-redis
+	@make start-redis
+	@echo "> redis restarted successfully"
+
+.PHONY: mocks swag lint test all run init install-linters check check-go-mod start-vault stop-vault restart-vault certs start-redis stop-redis restart-redis
