@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -27,6 +28,9 @@ type Service struct {
 type redisClient interface {
 	Connect(ctx context.Context) error
 	Close(ctx context.Context) error
+	Get(ctx context.Context, key string) (string, error)
+	SetWithLocking(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error)
+	Del(ctx context.Context, key string) error
 }
 
 // Option определяет опции для Service.
@@ -114,4 +118,16 @@ func (s *Service) Stop(ctx context.Context) error {
 	}
 
 	return s.client.Close(ctx)
+}
+
+func (s *Service) Get(ctx context.Context, key string) (string, error) {
+	return s.client.Get(ctx, key)
+}
+
+func (s *Service) SetWithLocking(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {
+	return s.client.SetWithLocking(ctx, key, value, ttl)
+}
+
+func (s *Service) Del(ctx context.Context, key string) error {
+	return s.client.Del(ctx, key)
 }

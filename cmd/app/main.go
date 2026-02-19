@@ -5,6 +5,7 @@ import (
 	handlerV0 "auth-service/internal/api/v0"
 	"auth-service/internal/config"
 	"auth-service/internal/server"
+	"auth-service/internal/service/auth"
 	"auth-service/internal/service/redis"
 	"auth-service/internal/storage/vault"
 	"context"
@@ -76,6 +77,13 @@ func main() {
 	redis := initRedisStorage(ctx, config.Redis)
 	defer butler.stop(ctx, redis)
 
+	authService := initAuthService(config.Auth, redis, vaultClient)
+	defer butler.stop(ctx, authService)
+
+	go butler.start(func() error {
+		return authService.Run(notifyCtx)
+	})
+
 	logrus.Info("all services started")
 
 	// Ждем сигнал завершения
@@ -114,6 +122,20 @@ func initServer(handlerV0 *handlerV0.Handler, cfg config.Server) *server.Server 
 			server.WithHandlerV0(handlerV0),
 			server.WithPort(cfg.Port),
 			server.WithShutdownTimeout(cfg.ShutdownTimeout),
+		),
+	)
+}
+
+func initAuthService(cfg config.Auth, redis *redis.Service, vaultClient *vault.Client) *auth.Service {
+	logrus.WithFields(logrus.Fields{
+		"update_key_interval": cfg.UpdateKeyInterval,
+	}).Info("initializing auth service")
+
+	return start(
+		auth.New(
+			auth.WithUpdateKeyInterval(cfg.UpdateKeyInterval),
+			auth.WithRedisClient(redis),
+			auth.WithVaultClient(vaultClient),
 		),
 	)
 }

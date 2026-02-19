@@ -4,6 +4,7 @@ import (
 	"auth-service/internal/config"
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -12,6 +13,10 @@ import (
 type cluster struct {
 	cfg   *config.Redis
 	cache *redis.ClusterClient
+
+	// Для управления блокировками с автоматическим обновлением TTL
+	locksMu sync.Mutex
+	locks   map[string]*lockInfo
 }
 
 // NewClusterClient создает новый экземпляр клиента для работы с Redis в режиме cluster.
@@ -50,5 +55,27 @@ func (c *cluster) Close(ctx context.Context) error {
 		"type":  "cluster",
 	}).Info("closing cluster client for redis cluster")
 
+	// Останавливаем все обновления блокировок
+	// Ключи останутся в Redis и истекут естественным образом через TTL
+	c.locksMu.Lock()
+
+	for _, lock := range c.locks {
+		lock.cancel()
+		lock.stopOnce.Do(func() {
+			close(lock.stopped)
+		})
+	}
+
+	c.locks = make(map[string]*lockInfo)
+	c.locksMu.Unlock()
+
 	return c.cache.Close()
+}
+
+func (c *cluster) Get(ctx context.Context, key string) (string, error) {
+	return c.cache.Get(ctx, key).Result()
+}
+
+func (c *cluster) Del(ctx context.Context, key string) error {
+	return c.cache.Del(ctx, key).Err()
 }

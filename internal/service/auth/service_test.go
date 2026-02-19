@@ -17,7 +17,7 @@ func TestNewService(t *testing.T) {
 	tests := []struct {
 		name       string
 		createOpts func(t *testing.T, mockVaultClient *mocks.MockvaultClient) []option
-		createWant func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service
+		createWant func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *Service
 		wantErr    require.ErrorAssertionFunc
 	}{
 		{
@@ -30,10 +30,10 @@ func TestNewService(t *testing.T) {
 					WithVaultClient(mockVaultClient),
 				}
 			},
-			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service {
+			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *Service {
 				t.Helper()
 
-				return &service{
+				return &Service{
 					updateKeyInterval: 1 * time.Second,
 					vaultClient:       mockVaultClient,
 				}
@@ -49,7 +49,7 @@ func TestNewService(t *testing.T) {
 					WithVaultClient(mockVaultClient),
 				}
 			},
-			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service {
+			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *Service {
 				t.Helper()
 
 				return nil
@@ -68,7 +68,7 @@ func TestNewService(t *testing.T) {
 					WithUpdateKeyInterval(1 * time.Second),
 				}
 			},
-			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service {
+			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *Service {
 				t.Helper()
 
 				return nil

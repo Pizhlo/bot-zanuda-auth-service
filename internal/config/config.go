@@ -16,6 +16,7 @@ type Config struct {
 	Server Server `yaml:"server" validate:"required"`
 	Vault  Vault  `yaml:"vault" validate:"required"`
 	Redis  Redis  `yaml:"redis" validate:"required"`
+	Auth   Auth   `yaml:"auth" validate:"required"`
 }
 
 // Server - конфигурация сервера.
@@ -23,6 +24,11 @@ type Server struct {
 	Port            int           `yaml:"port" validate:"required,min=1024,max=65535"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" validate:"required,min=1ms"`
 	SwaggerHost     string        `yaml:"swagger_host" validate:"omitempty,hostname_port"` // Опциональный host для swagger (например, "localhost:8080" или "api.example.com")
+}
+
+// Auth - конфигурация авторизации.
+type Auth struct {
+	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required,min=1ms"`
 }
 
 // Vault - конфигурация Vault.
