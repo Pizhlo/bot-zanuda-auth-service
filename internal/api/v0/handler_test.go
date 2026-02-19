@@ -116,7 +116,7 @@ func testRequest(t *testing.T, ts *httptest.Server, method,
 		return http.ErrUseLastResponse
 	}
 
-	resp, err := ts.Client().Do(req)
+	resp, err := ts.Client().Do(req) //nolint:gosec // тестовая функция
 	require.NoError(t, err)
 
 	return resp

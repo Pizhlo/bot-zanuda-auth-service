@@ -3,6 +3,12 @@ CUR_DIR := $(patsubst %/,%, $(dir $(MAKEFILE_PATH)))
 BUILD_DIR := $(CUR_DIR)/.build
 APP_EXECUTABLE_DIR := $(BUILD_DIR)/bin
 
+# Путь к go (при вызове make из терминала PATH передаётся в make)
+GO ?= $(shell command -v go 2>/dev/null || echo "go")
+# Пути к линтерам (go install ставит в GOPATH/bin или HOME/go/bin)
+STATICCHECK ?= $(shell command -v staticcheck 2>/dev/null || echo "$$HOME/go/bin/staticcheck")
+GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || echo "$$HOME/go/bin/golangci-lint")
+
 # заглушает вывод make
 # MAKEFLAGS+=silent # временно отключено, пока не сделана задача BZ-26
 
@@ -122,27 +128,27 @@ _cleanup-temp-files:
 
 install-linters:
 	@echo "> installing linters..."
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	$(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	@echo "> golangci-lint installed successfully"
-	golangci-lint --version
+	$(GOLANGCI_LINT) --version
 	
 	@echo "> installing staticcheck"
-	go install honnef.co/go/tools/cmd/staticcheck@latest
+	$(GO) install honnef.co/go/tools/cmd/staticcheck@latest
 	@echo "> staticcheck installed successfully"
-	staticcheck --version
+	$(STATICCHECK) --version
 	
 	@echo "> linters installed successfully"
 
 lint:
 	@echo "> linting..."
-	go vet ./...
-	staticcheck ./...
-	golangci-lint run ./...
+	$(GO) vet ./...
+	$(STATICCHECK) ./...
+	$(GOLANGCI_LINT) run ./...
 	@echo "> linting successfully finished"
 
 test:
 	@echo "> testing..."
-	go test -cover -gcflags="-l" -race -v ./...
+	$(GO) test -cover -gcflags="-l" -race -v ./...
 	@echo "> successfully finished"
 
 all:	
@@ -160,12 +166,12 @@ check:
 
 check-go-mod:
 	@echo "> checking go.mod..."
-	go mod verify
+	$(GO) mod verify
 	@echo "> go.mod checked successfully"
 
 check-test-files:
 	@echo "> checking test files..."
-	./scripts/check-test-files.sh $$(go list -f '{{.Dir}}' ./...)
+	./scripts/check-test-files.sh $$($(GO) list -f '{{.Dir}}' ./...)
 	@echo "> test files checked successfully"
 
 build:
@@ -222,3 +228,21 @@ restart-redis:
 	@echo "> redis restarted successfully"
 
 .PHONY: mocks swag lint test all run init install-linters check check-go-mod start-vault stop-vault restart-vault certs start-redis stop-redis restart-redis
+
+-include .env
+
+export POSTGRES_USER
+export POSTGRES_PASSWORD
+export POSTGRES_DB
+export POSTGRES_HOST
+export POSTGRES_PORT
+
+DB_URL=postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+
+migrate-up:
+	migrate -path ./migration -database "$(DB_URL)" -verbose up
+
+migrate-down:
+	migrate -path ./migration -database "$(DB_URL)" -verbose down 1
+
+.PHONY: migrate-up migrate-down

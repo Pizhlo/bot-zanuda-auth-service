@@ -29,6 +29,27 @@ services:
     volumes:
       - redis-data:/data
 
+  postgres:
+    image: postgres:16
+    container_name: auth-service-postgres-local
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
 volumes:
   vault_data:
   redis-data:
+  pgdata:
