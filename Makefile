@@ -228,3 +228,21 @@ restart-redis:
 	@echo "> redis restarted successfully"
 
 .PHONY: mocks swag lint test all run init install-linters check check-go-mod start-vault stop-vault restart-vault certs start-redis stop-redis restart-redis
+
+-include .env
+
+export POSTGRES_USER
+export POSTGRES_PASSWORD
+export POSTGRES_DB
+export POSTGRES_HOST
+export POSTGRES_PORT
+
+DB_URL=postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+
+migrate-up:
+	migrate -path ./migration -database "$(DB_URL)" -verbose up
+
+migrate-down:
+	migrate -path ./migration -database "$(DB_URL)" -verbose down 1
+
+.PHONY: migrate-up migrate-down
