@@ -13,9 +13,10 @@ import (
 type Config struct {
 	LogLevel string `yaml:"log_level" validate:"required,oneof=debug info warn error"`
 
-	Server Server `yaml:"server" validate:"required"`
-	Vault  Vault  `yaml:"vault" validate:"required"`
-	Redis  Redis  `yaml:"redis" validate:"required"`
+	Server   Server   `yaml:"server" validate:"required"`
+	Vault    Vault    `yaml:"vault" validate:"required"`
+	Redis    Redis    `yaml:"redis" validate:"required"`
+	Postgres Postgres `yaml:"postgres" validate:"required"`
 }
 
 // Server - конфигурация сервера.
@@ -53,6 +54,17 @@ type Redis struct {
 	Port int    `yaml:"port" validate:"omitempty,min=1024,max=65535"`
 	// cluster
 	Addrs []string `yaml:"addrs" validate:"omitempty,dive,hostname_port"`
+}
+
+// Postgres - конфигурация PostgreSQL.
+type Postgres struct {
+	Host          string        `yaml:"host" validate:"required"`
+	Port          int           `yaml:"port" validate:"required,min=1024,max=65535"`
+	User          string        `yaml:"user" validate:"required"`
+	Password      string        `yaml:"password" validate:"required"`
+	DBName        string        `yaml:"db_name" validate:"required"`
+	InsertTimeout time.Duration `yaml:"insert_timeout" validate:"required,min=1"`
+	ReadTimeout   time.Duration `yaml:"read_timeout" validate:"required,min=1"`
 }
 
 // LoadConfig загружает конфигурацию.
