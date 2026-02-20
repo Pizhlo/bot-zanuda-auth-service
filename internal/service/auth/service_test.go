@@ -28,6 +28,7 @@ func TestNewService(t *testing.T) {
 				return []option{
 					WithUpdateKeyInterval(1 * time.Second),
 					WithVaultClient(mockVaultClient),
+					WithSecretKey([]byte("abc")),
 				}
 			},
 			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service {
@@ -36,6 +37,7 @@ func TestNewService(t *testing.T) {
 				return &service{
 					updateKeyInterval: 1 * time.Second,
 					vaultClient:       mockVaultClient,
+					secretKey:         []byte("abc"),
 				}
 			},
 			wantErr: require.NoError,
@@ -46,6 +48,7 @@ func TestNewService(t *testing.T) {
 				t.Helper()
 
 				return []option{
+					WithSecretKey([]byte("abc")),
 					WithVaultClient(mockVaultClient),
 				}
 			},
@@ -65,6 +68,7 @@ func TestNewService(t *testing.T) {
 				t.Helper()
 
 				return []option{
+					WithSecretKey([]byte("abc")),
 					WithUpdateKeyInterval(1 * time.Second),
 				}
 			},
@@ -76,6 +80,26 @@ func TestNewService(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "vault client is required")
+			},
+		},
+		{
+			name: "error case: secret key is required",
+			createOpts: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) []option {
+				t.Helper()
+
+				return []option{
+					WithVaultClient(mockVaultClient),
+					WithUpdateKeyInterval(1 * time.Second),
+				}
+			},
+			createWant: func(t *testing.T, mockVaultClient *mocks.MockvaultClient) *service {
+				t.Helper()
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "secret key is required")
 			},
 		},
 	}

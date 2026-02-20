@@ -66,6 +66,7 @@ require (
 
 require (
 	github.com/go-playground/validator/v10 v10.28.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang/mock v1.6.0
 	github.com/hashicorp/vault/api v1.22.0
 	github.com/labstack/echo-contrib v0.17.4

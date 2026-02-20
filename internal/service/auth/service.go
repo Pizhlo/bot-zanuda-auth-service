@@ -10,6 +10,7 @@ import (
 type service struct {
 	updateKeyInterval time.Duration // периодичность, с которой нужно обновлять ключ
 	vaultClient       vaultClient   // клиент для доступа к vault
+	secretKey         []byte
 }
 
 // vaultClient - интерфейс для доступа к vault.
@@ -20,6 +21,13 @@ type vaultClient interface {
 }
 
 type option func(*service)
+
+// WithSecretKey устанавливает секретный ключ для генерации jwt-токена.
+func WithSecretKey(secretKey []byte) option {
+	return func(a *service) {
+		a.secretKey = secretKey
+	}
+}
 
 // WithUpdateKeyInterval устанавливает периодичность обновления ключа авторизации.
 func WithUpdateKeyInterval(interval time.Duration) option {
@@ -49,6 +57,10 @@ func New(opts ...option) (*service, error) {
 
 	if s.vaultClient == nil {
 		return nil, errors.New("vault client is required")
+	}
+
+	if len(s.secretKey) == 0 {
+		return nil, errors.New("secret key is required")
 	}
 
 	return s, nil
