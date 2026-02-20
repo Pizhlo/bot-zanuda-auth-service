@@ -6,7 +6,7 @@ ALTER TABLE public.schema_migrations
 CREATE SCHEMA  IF NOT EXISTS users;
 
 -- Пользователь
-CREATE TABLE IF NOT EXISTS users.users (
+CREATE TABLE IF NOT EXISTS users.telegram (
     id              BIGSERIAL PRIMARY KEY,
     tg_id           BIGINT UNIQUE NOT NULL,
 
@@ -46,8 +46,8 @@ END $$;
 CREATE TABLE IF NOT EXISTS spaces.spaces (
     id                  BIGSERIAL PRIMARY KEY,
     type                space_type NOT NULL DEFAULT 'PERSONAL',
-    owner_id            BIGINT NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
-    default_participant_role VARCHAR(64) NOT NULL DEFAULT 'VIEWER',
+    owner_id            BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    default_participant_role VARCHAR(64) NOT NULL DEFAULT 'EDITOR',
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -273,14 +273,40 @@ END $$;
 -- INVITED - ожидание ответа на приглашение
 -- BLOCKED - исключен из пространства
 
+-- При удалении роли переводим участников в роль VIEWER (триггер ниже)
 CREATE TABLE IF NOT EXISTS spaces.space_member (
     space_id    BIGINT NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    user_id     BIGINT NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
-    role_id     BIGINT NOT NULL REFERENCES spaces.space_role(id) ON DELETE SET DEFAULT 'EDITOR',
-    invited_by  BIGINT REFERENCES users.users(id) ON DELETE SET NULL,
+    user_id     BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    role_id     BIGINT NOT NULL REFERENCES spaces.space_role(id) ON DELETE NO ACTION,
+    invited_by  BIGINT REFERENCES users.telegram(id) ON DELETE SET NULL,
     status      member_status NOT NULL DEFAULT 'INVITED',
 
-    can_invite  BOOLEAN,   -- NULL = по роли, TRUE = разрешаем даже если роль не может
+    can_invite  BOOLEAN NOT NULL DEFAULT true,   -- NULL = по роли, TRUE = разрешаем даже если роль не может
+
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (space_id, user_id)
 );
+
+-- При удалении роли переводим участников в роль VIEWER
+CREATE OR REPLACE FUNCTION spaces.on_space_role_delete_set_viewer()
+RETURNS TRIGGER AS $$
+DECLARE
+  viewer_role_id BIGINT;
+BEGIN
+  IF OLD.code = 'VIEWER' THEN
+    RAISE EXCEPTION 'Cannot delete VIEWER role: it is used as fallback when other roles are removed';
+  END IF;
+  SELECT id INTO viewer_role_id FROM spaces.space_role WHERE code = 'VIEWER' LIMIT 1;
+  IF viewer_role_id IS NULL THEN
+    RAISE EXCEPTION 'VIEWER role not found';
+  END IF;
+  UPDATE spaces.space_member SET role_id = viewer_role_id WHERE role_id = OLD.id;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS tr_space_role_delete_set_viewer ON spaces.space_role;
+CREATE TRIGGER tr_space_role_delete_set_viewer
+  BEFORE DELETE ON spaces.space_role
+  FOR EACH ROW EXECUTE FUNCTION spaces.on_space_role_delete_set_viewer();

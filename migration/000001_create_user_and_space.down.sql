@@ -1,3 +1,5 @@
+DROP TRIGGER IF EXISTS tr_space_role_delete_set_viewer ON spaces.space_role;
+
 DROP TABLE IF EXISTS spaces.space_member CASCADE;
 DROP TABLE IF EXISTS spaces.space_role_permission CASCADE;
 DROP TABLE IF EXISTS spaces.space_role CASCADE;
@@ -20,7 +22,7 @@ BEGIN
 END $$;
 
 -- Пользователь
-DROP TABLE IF EXISTS users.users CASCADE;
+DROP TABLE IF EXISTS users.telegram CASCADE;
 
 ALTER TABLE IF EXISTS public.schema_migrations
   DROP COLUMN created;
