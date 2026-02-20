@@ -1,0 +1,1 @@
+DELETE FROM users.telegram where tg_id = 1234567;

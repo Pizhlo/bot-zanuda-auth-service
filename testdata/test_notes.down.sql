@@ -1,0 +1,1 @@
+DELETE FROM notes.notes where space_id = 1 AND author_id = 1;
