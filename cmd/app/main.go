@@ -5,7 +5,12 @@ import (
 	handlerV0 "auth-service/internal/api/v0"
 	"auth-service/internal/config"
 	"auth-service/internal/server"
+	"auth-service/internal/service/auth"
+	"auth-service/internal/service/politics"
+	"auth-service/internal/service/politics/access"
+	"auth-service/internal/service/politics/permissions"
 	"auth-service/internal/service/redis"
+	repo "auth-service/internal/storage/postgres"
 	"auth-service/internal/storage/vault"
 	"context"
 	"flag"
@@ -13,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -20,8 +26,13 @@ import (
 // @title           Auth Service API
 // @version         1.0
 // @description     API для работы с авторизацией
-// @host            localhost:8080 // Дефолтное значение, будет перезаписано динамически из конфига
-// @basePath        /api/v0 //nolint:godot // swagger комментарии не должны заканчиваться точкой.
+// @host            localhost:8080
+// @basePath        /api/v0
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+//
+//nolint:funlen // длинная функция запуска
 func main() {
 	ctx := context.Background()
 
@@ -58,13 +69,6 @@ func main() {
 	notifyCtx, notify := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 	defer notify()
 
-	handlerV0 := initHandlerV0(butler.BuildInfo)
-	server := initServer(handlerV0, config.Server)
-
-	go butler.start(func() error {
-		return server.Start(notifyCtx)
-	})
-
 	vaultClient := initVaultClient(config.Vault)
 
 	if err := vaultClient.Connect(); err != nil {
@@ -72,6 +76,31 @@ func main() {
 	}
 
 	defer butler.stop(ctx, vaultClient)
+
+	authSvc := initAuthService([]byte(config.Auth.SecretKey), vaultClient, config.Auth.UpdateKeyInterval)
+
+	repo := initPostgresStorage(ctx, config.Postgres)
+
+	if err := repo.Run(ctx); err != nil {
+		logrus.WithFields(logrus.Fields{
+			"db_name": config.Postgres.DBName,
+		}).Fatal("unable to connect postgres")
+	}
+
+	defer butler.stop(ctx, repo)
+
+	spaceAccessChecker := initSpaceAccessChecker(repo)
+	notePermissionResolver := initNotePermissionResolver()
+
+	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
+
+	handlerV0 := initHandlerV0(butler.BuildInfo, politicsSvc)
+	middlewareHandler := initMiddlewareHandler(authSvc)
+	server := initServer(handlerV0, middlewareHandler, config.Server)
+
+	go butler.start(func() error {
+		return server.Start(notifyCtx)
+	})
 
 	redis := initRedisStorage(ctx, config.Redis)
 	defer butler.stop(ctx, redis)
@@ -87,7 +116,51 @@ func main() {
 	logrus.Info("all services stopped")
 }
 
-func initHandlerV0(buildInfo *BuildInfo) *handlerV0.Handler {
+func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
+	addr := formatPostgresAddr(cfg)
+
+	logrus.WithFields(logrus.Fields{
+		"host":           cfg.Host,
+		"port":           cfg.Port,
+		"user":           cfg.User,
+		"db_name":        cfg.DBName,
+		"insert_timeout": cfg.InsertTimeout,
+		"read_timeout":   cfg.ReadTimeout,
+	}).Info("connecting postgres")
+
+	return start(repo.New(ctx, repo.WithAddr(addr),
+		repo.WithInsertTimeout(cfg.InsertTimeout),
+		repo.WithReadTimeout(cfg.ReadTimeout),
+	))
+}
+
+func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissionResolver, spaceChecker *access.SpaceAccessChecker) *politics.Service {
+	logrus.Info("initializing politics service")
+
+	return start(
+		politics.New(
+			politics.WithStorage(storage),
+			politics.WithNotePermissionResolver(resolver),
+			politics.WithSpaceAccessChecker(spaceChecker),
+		),
+	)
+}
+
+func initAuthService(secretKey []byte, vaultClient *vault.Client, updateKeyInterval time.Duration) *auth.Service {
+	logrus.WithFields(logrus.Fields{
+		"update_key_interval": updateKeyInterval,
+	}).Info("initializing auth service")
+
+	return start(
+		auth.New(
+			auth.WithSecretKey(secretKey),
+			auth.WithUpdateKeyInterval(updateKeyInterval),
+			auth.WithVaultClient(vaultClient),
+		),
+	)
+}
+
+func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService) *handlerV0.Handler {
 	logrus.WithFields(logrus.Fields{
 		"version":   buildInfo.Version,
 		"buildDate": buildInfo.BuildDate,
@@ -99,11 +172,38 @@ func initHandlerV0(buildInfo *BuildInfo) *handlerV0.Handler {
 			handlerV0.WithVersion(buildInfo.Version),
 			handlerV0.WithBuildDate(buildInfo.BuildDate),
 			handlerV0.WithGitCommit(buildInfo.GitCommit),
+			handlerV0.WithPoliticsService(politics),
 		),
 	)
 }
 
-func initServer(handlerV0 *handlerV0.Handler, cfg config.Server) *server.Server {
+func initMiddlewareHandler(authSvc handlerV0.AuthService) *handlerV0.MiddlewareHandler {
+	logrus.Info("initializing middleware handler")
+
+	return start(
+		handlerV0.NewMiddlewareHandler(
+			handlerV0.WithAuthService(authSvc),
+		),
+	)
+}
+
+func initSpaceAccessChecker(storage *repo.Repo) *access.SpaceAccessChecker {
+	logrus.Info("initializing space access checker")
+
+	return start(
+		access.New(access.WithStorage(storage)),
+	)
+}
+
+func initNotePermissionResolver() *permissions.NotePermissionResolver {
+	logrus.Info("initializing note permission resolver")
+
+	return start(
+		permissions.NewNotePermissionResolver(), nil,
+	)
+}
+
+func initServer(handlerV0 *handlerV0.Handler, mdHandler *handlerV0.MiddlewareHandler, cfg config.Server) *server.Server {
 	logrus.WithFields(logrus.Fields{
 		"port":            cfg.Port,
 		"shutdownTimeout": cfg.ShutdownTimeout,
@@ -114,6 +214,7 @@ func initServer(handlerV0 *handlerV0.Handler, cfg config.Server) *server.Server 
 			server.WithHandlerV0(handlerV0),
 			server.WithPort(cfg.Port),
 			server.WithShutdownTimeout(cfg.ShutdownTimeout),
+			server.WithMiddlewareHandler(mdHandler),
 		),
 	)
 }
@@ -174,4 +275,10 @@ func updateSwaggerHost(cfg config.Server) {
 
 	docs.SwaggerInfo.Host = host
 	logrus.WithField("swagger_host", host).Debug("swagger host updated")
+}
+
+func formatPostgresAddr(cfg config.Postgres) string {
+	return fmt.Sprintf("postgresql://%s:%s@%s:%d/%s?sslmode=disable",
+		cfg.User, cfg.Password,
+		cfg.Host, cfg.Port, cfg.DBName)
 }

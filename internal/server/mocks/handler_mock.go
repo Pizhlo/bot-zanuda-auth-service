@@ -34,6 +34,20 @@ func (m *Mockhandler) EXPECT() *MockhandlerMockRecorder {
 	return m.recorder
 }
 
+// FilterNotes mocks base method.
+func (m *Mockhandler) FilterNotes(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FilterNotes", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FilterNotes indicates an expected call of FilterNotes.
+func (mr *MockhandlerMockRecorder) FilterNotes(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterNotes", reflect.TypeOf((*Mockhandler)(nil).FilterNotes), c)
+}
+
 // Health mocks base method.
 func (m *Mockhandler) Health(c echo.Context) error {
 	m.ctrl.T.Helper()
@@ -134,4 +148,78 @@ func (m *MockhealthHandler) Health(c echo.Context) error {
 func (mr *MockhealthHandlerMockRecorder) Health(c interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Health", reflect.TypeOf((*MockhealthHandler)(nil).Health), c)
+}
+
+// MocknotesEditor is a mock of notesEditor interface.
+type MocknotesEditor struct {
+	ctrl     *gomock.Controller
+	recorder *MocknotesEditorMockRecorder
+}
+
+// MocknotesEditorMockRecorder is the mock recorder for MocknotesEditor.
+type MocknotesEditorMockRecorder struct {
+	mock *MocknotesEditor
+}
+
+// NewMocknotesEditor creates a new mock instance.
+func NewMocknotesEditor(ctrl *gomock.Controller) *MocknotesEditor {
+	mock := &MocknotesEditor{ctrl: ctrl}
+	mock.recorder = &MocknotesEditorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MocknotesEditor) EXPECT() *MocknotesEditorMockRecorder {
+	return m.recorder
+}
+
+// FilterNotes mocks base method.
+func (m *MocknotesEditor) FilterNotes(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FilterNotes", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FilterNotes indicates an expected call of FilterNotes.
+func (mr *MocknotesEditorMockRecorder) FilterNotes(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterNotes", reflect.TypeOf((*MocknotesEditor)(nil).FilterNotes), c)
+}
+
+// MockmiddlewareHandler is a mock of middlewareHandler interface.
+type MockmiddlewareHandler struct {
+	ctrl     *gomock.Controller
+	recorder *MockmiddlewareHandlerMockRecorder
+}
+
+// MockmiddlewareHandlerMockRecorder is the mock recorder for MockmiddlewareHandler.
+type MockmiddlewareHandlerMockRecorder struct {
+	mock *MockmiddlewareHandler
+}
+
+// NewMockmiddlewareHandler creates a new mock instance.
+func NewMockmiddlewareHandler(ctrl *gomock.Controller) *MockmiddlewareHandler {
+	mock := &MockmiddlewareHandler{ctrl: ctrl}
+	mock.recorder = &MockmiddlewareHandlerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockmiddlewareHandler) EXPECT() *MockmiddlewareHandlerMockRecorder {
+	return m.recorder
+}
+
+// CheckToken mocks base method.
+func (m *MockmiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckToken", next)
+	ret0, _ := ret[0].(echo.HandlerFunc)
+	return ret0
+}
+
+// CheckToken indicates an expected call of CheckToken.
+func (mr *MockmiddlewareHandlerMockRecorder) CheckToken(next interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockmiddlewareHandler)(nil).CheckToken), next)
 }

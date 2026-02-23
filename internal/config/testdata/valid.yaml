@@ -4,6 +4,10 @@ server:
   port: 8080
   shutdown_timeout: 100ms
 
+auth:
+  update_key_interval: 1h
+  secret_key: your-key
+
 vault:
   address: "https://localhost:8200"
   token: "vault-token"
@@ -12,3 +16,12 @@ redis:
   type: "single"
   host: "localhost"
   port: 6379
+
+postgres:
+  host: localhost
+  port: 5432
+  user: user
+  db_name: db
+  password: pass
+  insert_timeout: 5s
+  read_timeout: 5s

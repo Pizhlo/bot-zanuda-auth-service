@@ -75,7 +75,7 @@ func New(ctx context.Context, opts ...RepoOption) (*Repo, error) {
 
 	db, err := sql.Open("postgres", r.addr)
 	if err != nil {
-		return nil, fmt.Errorf("connect open a db driver: %w", err)
+		return nil, fmt.Errorf("cannot open a db driver: %w", err)
 	}
 
 	logger := logrus.New()
@@ -107,6 +107,9 @@ func (db *Repo) Stop(_ context.Context) error {
 
 // Run запускает репозиторий.
 func (db *Repo) Run(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, db.readTimeout)
+	defer cancel()
+
 	if err := db.db.PingContext(ctx); err != nil {
 		return fmt.Errorf("error pinging db: %w", err)
 	}

@@ -17,6 +17,13 @@ type Config struct {
 	Vault    Vault    `yaml:"vault" validate:"required"`
 	Redis    Redis    `yaml:"redis" validate:"required"`
 	Postgres Postgres `yaml:"postgres" validate:"required"`
+	Auth     Auth     `yaml:"auth" validate:"required"`
+}
+
+// Auth - данные для работы Auth-сервиса.
+type Auth struct {
+	SecretKey         string        `yaml:"secret_key" validate:"required"`          // секретный ключ для генерации токена.
+	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required"` // интервал для обновления апи-ключа в Vault.
 }
 
 // Server - конфигурация сервера.
@@ -61,7 +68,7 @@ type Postgres struct {
 	Host          string        `yaml:"host" validate:"required"`
 	Port          int           `yaml:"port" validate:"required,min=1024,max=65535"`
 	User          string        `yaml:"user" validate:"required"`
-	Password      string        `yaml:"password" validate:"required"`
+	Password      string        `yaml:"password" validate:"required"` //nolint:gosec // G117: нужно экспортировать для парсинга конфига из YAML
 	DBName        string        `yaml:"db_name" validate:"required"`
 	InsertTimeout time.Duration `yaml:"insert_timeout" validate:"required,min=1"`
 	ReadTimeout   time.Duration `yaml:"read_timeout" validate:"required,min=1"`

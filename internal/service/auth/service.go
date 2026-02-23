@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// service - сервис для работы с авторизацией.
+// Service - сервис для работы с авторизацией.
 // используется для получения ключа авторизации из vault и его обновления, а также для генерации jwt токенов.
-type service struct {
+type Service struct {
 	updateKeyInterval time.Duration // периодичность, с которой нужно обновлять ключ
 	vaultClient       vaultClient   // клиент для доступа к vault
 	secretKey         []byte
@@ -20,32 +20,32 @@ type vaultClient interface {
 	// здесь методы для доступа к vault
 }
 
-type option func(*service)
+type option func(*Service)
 
 // WithSecretKey устанавливает секретный ключ для генерации jwt-токена.
 func WithSecretKey(secretKey []byte) option {
-	return func(a *service) {
+	return func(a *Service) {
 		a.secretKey = secretKey
 	}
 }
 
 // WithUpdateKeyInterval устанавливает периодичность обновления ключа авторизации.
 func WithUpdateKeyInterval(interval time.Duration) option {
-	return func(s *service) {
+	return func(s *Service) {
 		s.updateKeyInterval = interval
 	}
 }
 
 // WithVaultClient устанавливает клиент для доступа к vault.
 func WithVaultClient(client vaultClient) option {
-	return func(s *service) {
+	return func(s *Service) {
 		s.vaultClient = client
 	}
 }
 
 // New создает новый сервис для работы с авторизацией.
-func New(opts ...option) (*service, error) {
-	s := &service{}
+func New(opts ...option) (*Service, error) {
+	s := &Service{}
 
 	for _, opt := range opts {
 		opt(s)

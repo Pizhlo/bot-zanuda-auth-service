@@ -143,7 +143,7 @@ func TestGetPayload(t *testing.T) {
 	}
 }
 
-func createTestAuthService(t *testing.T, secretKey []byte) *service {
+func createTestAuthService(t *testing.T, secretKey []byte) *Service {
 	t.Helper()
 
 	updateKey := 1 * time.Minute

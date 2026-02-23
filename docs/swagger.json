@@ -9,6 +9,81 @@
     "host": "localhost:8080",
     "basePath": "/api/v0",
     "paths": {
+        "/auth/notes/filter": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Фильтрует входящий список айди заметок, возвращая только те, которые доступны пользователю (в соответствии с политиками).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "notes"
+                ],
+                "summary": "Фильтрация записей, доступных пользователю",
+                "parameters": [
+                    {
+                        "description": "Запрос на фильтрацию заметок",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/auth-service_internal_model.FilterNotesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/auth-service_internal_model.FilterNotesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Некорректный запрос",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Пользователь не авторизован",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Нет доступа к запрошенным заметкам",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Внутренняя ошибка сервера",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/health": {
             "get": {
                 "description": "Проверить состояние сервера и соединения",
@@ -19,6 +94,52 @@
                     }
                 }
             }
+        }
+    },
+    "definitions": {
+        "auth-service_internal_model.FilterNotesRequest": {
+            "type": "object",
+            "properties": {
+                "note_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "space_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "auth-service_internal_model.FilterNotesResponse": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/auth-service_internal_model.NoteAccessInfo"
+                    }
+                }
+            }
+        },
+        "auth-service_internal_model.NoteAccessInfo": {
+            "type": "object",
+            "properties": {
+                "can_edit": {
+                    "description": "может ли пользователь редактировать заметку",
+                    "type": "boolean"
+                },
+                "can_read": {
+                    "type": "boolean"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }
