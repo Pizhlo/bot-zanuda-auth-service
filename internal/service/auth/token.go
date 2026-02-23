@@ -9,7 +9,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-func (s *service) CheckToken(authHeader string) (*jwt.Token, error) {
+// CheckToken проверяет токен на валидность: поле exp и наличие payload.
+func (s *Service) CheckToken(authHeader string) (*jwt.Token, error) {
 	logrus.Debug("check token")
 
 	if !strings.HasPrefix(authHeader, "Bearer") {
@@ -31,7 +32,8 @@ func (s *service) CheckToken(authHeader string) (*jwt.Token, error) {
 	return token, nil
 }
 
-func (s *service) ParseToken(tokenString string) (*jwt.Token, error) {
+// ParseToken парсит токен в виде строки и возвращает *jwt.Token.
+func (s *Service) ParseToken(tokenString string) (*jwt.Token, error) {
 	logrus.Debug("parsing token")
 
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
@@ -43,7 +45,8 @@ func (s *service) ParseToken(tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func (s *service) GetPayload(token *jwt.Token) (jwt.MapClaims, bool) {
+// GetPayload возвращает информацию токена в виде map[string]any.
+func (s *Service) GetPayload(token *jwt.Token) (jwt.MapClaims, bool) {
 	if token == nil {
 		return nil, false
 	}

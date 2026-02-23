@@ -1,11 +1,13 @@
 package v0
 
 import (
+	"auth-service/internal/api/v0/mocks"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,10 +19,16 @@ func TestHealth(t *testing.T) {
 	buildDate := "2021-01-01"
 	gitCommit := "1234567890"
 
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	politicsSvc := mocks.NewMockPoliticsService(ctrl)
+
 	handler, err := New(
 		WithVersion(version),
 		WithBuildDate(buildDate),
 		WithGitCommit(gitCommit),
+		WithPoliticsService(politicsSvc),
 	)
 	require.NoError(t, err)
 

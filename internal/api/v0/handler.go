@@ -1,6 +1,8 @@
 package v0
 
 import (
+	"auth-service/internal/model"
+	"context"
 	"errors"
 
 	"github.com/sirupsen/logrus"
@@ -13,6 +15,20 @@ type Handler struct {
 	gitCommit string
 
 	apiVersion string
+
+	// services
+
+	PoliticsService PoliticsService
+}
+
+// PoliticsService - интерфейс для доступа к сервису политик. Отвечает за доступ пользователей к данным.
+//
+//go:generate mockgen -source=handler.go -destination=mocks/mocks.go -package=mocks PoliticsService
+type PoliticsService interface {
+	// FilterNotes фильтрует входящие заметки согласно политикам.
+	// Возвращает только заметки, доступные пользователю, с флагом canEdit -
+	// может ли пользователь редактировать заметку.
+	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[int]model.NoteAccessInfo, error)
 }
 
 type handlerOption func(*Handler)
@@ -38,6 +54,13 @@ func WithGitCommit(gitCommit string) handlerOption {
 	}
 }
 
+// WithPoliticsService устанавливает сервис политик.
+func WithPoliticsService(svc PoliticsService) handlerOption {
+	return func(h *Handler) {
+		h.PoliticsService = svc
+	}
+}
+
 // New создает новый хендлер. Автоматически устанавливает версию хендлера на Version0.
 func New(opts ...handlerOption) (*Handler, error) {
 	h := &Handler{}
@@ -56,6 +79,10 @@ func New(opts ...handlerOption) (*Handler, error) {
 
 	if h.gitCommit == "" {
 		return nil, errors.New("gitCommit is required")
+	}
+
+	if h.PoliticsService == nil {
+		return nil, errors.New("politics service is required")
 	}
 
 	h.apiVersion = Version0

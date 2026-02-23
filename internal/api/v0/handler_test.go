@@ -1,11 +1,13 @@
 package v0
 
 import (
+	"auth-service/internal/api/v0/mocks"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +23,7 @@ func TestNew(t *testing.T) {
 		buildDate string
 		gitCommit string
 		wantErr   require.ErrorAssertionFunc
-		want      *Handler
+		makeWant  func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler
 	}
 
 	tests := []test{
@@ -31,7 +33,15 @@ func TestNew(t *testing.T) {
 			buildDate: "2021-01-01",
 			gitCommit: "1234567890",
 			wantErr:   require.NoError,
-			want:      &Handler{version: "1.0.0", buildDate: "2021-01-01", gitCommit: "1234567890", apiVersion: Version0},
+			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+				return &Handler{
+					version:         "1.0.0",
+					buildDate:       "2021-01-01",
+					gitCommit:       "1234567890",
+					apiVersion:      Version0,
+					PoliticsService: &politicsSvc,
+				}
+			},
 		},
 		{
 			name:      "version is required",
@@ -42,7 +52,11 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "version is required")
 			},
-			want: nil,
+			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+				t.Helper()
+
+				return nil
+			},
 		},
 		{
 			name:      "buildDate is required",
@@ -53,7 +67,11 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "buildDate is required")
 			},
-			want: nil,
+			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+				t.Helper()
+
+				return nil
+			},
 		},
 		{
 			name:      "gitCommit is required",
@@ -64,7 +82,11 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "gitCommit is required")
 			},
-			want: nil,
+			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+				t.Helper()
+
+				return nil
+			},
 		},
 	}
 
@@ -72,14 +94,21 @@ func TestNew(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			authSvc := mocks.NewMockAuthService(ctrl)
+			politicsSvc := mocks.NewMockPoliticsService(ctrl)
+
 			handler, err := New(
 				WithVersion(tt.version),
 				WithBuildDate(tt.buildDate),
 				WithGitCommit(tt.gitCommit),
+				WithPoliticsService(politicsSvc),
 			)
 
 			tt.wantErr(t, err)
-			assert.Equal(t, tt.want, handler)
+			assert.Equal(t, tt.makeWant(*authSvc, *politicsSvc), handler)
 		})
 	}
 }
@@ -87,10 +116,16 @@ func TestNew(t *testing.T) {
 func TestHandler_Version(t *testing.T) {
 	t.Parallel()
 
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	politicsSvc := mocks.NewMockPoliticsService(ctrl)
+
 	handler, err := New(
 		WithVersion("1.0.0"),
 		WithBuildDate("2021-01-01"),
 		WithGitCommit("1234567890"),
+		WithPoliticsService(politicsSvc),
 	)
 
 	require.NoError(t, err)

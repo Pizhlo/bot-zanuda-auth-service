@@ -25,7 +25,8 @@ type Server struct {
 	e *echo.Echo
 
 	api struct {
-		h0 handler
+		h0         handler
+		middleware middlewareHandler
 	}
 }
 
@@ -33,6 +34,7 @@ type Server struct {
 type handler interface {
 	healthHandler
 	versionHandler
+	notesEditor
 }
 
 type versionHandler interface {
@@ -42,6 +44,17 @@ type versionHandler interface {
 
 type healthHandler interface {
 	Health(c echo.Context) error
+}
+
+type notesEditor interface {
+	// FilterNotes фильтрует входящий список заметок, возвращая только те, которые доступны пользователю
+	// согласно политикам.
+	FilterNotes(c echo.Context) error
+}
+
+type middlewareHandler interface {
+	// CheckToken проверяет токен из запроса. Проверяет на expired, а также наличие user_id.
+	CheckToken(next echo.HandlerFunc) echo.HandlerFunc
 }
 
 // Option - опция для настройки сервера.
@@ -68,12 +81,20 @@ func WithHandlerV0(handler handler) Option {
 	}
 }
 
+// WithMiddlewareHandler устанавливает хендлер для использования middleware.
+func WithMiddlewareHandler(h middlewareHandler) Option {
+	return func(s *Server) {
+		s.api.middleware = h
+	}
+}
+
 // New - создает новый сервер. Принимает опции для настройки сервера.
 // Доступные опции:
 //
 //   - WithPort - устанавливает порт сервера.
 //   - WithHandlerV0 - устанавливает хендлер версии 0.
 //   - WithShutdownTimeout - устанавливает таймаут graceful shutdown.
+//   - WithMiddlewareHandler - устанавливает хендлер для использования middleware.
 func New(opts ...Option) (*Server, error) {
 	s := &Server{}
 	for _, opt := range opts {
@@ -90,6 +111,10 @@ func New(opts ...Option) (*Server, error) {
 
 	if s.shutdownTimeout == 0 {
 		return nil, fmt.Errorf("shutdown timeout is required")
+	}
+
+	if s.api.middleware == nil {
+		return nil, fmt.Errorf("middleware handler is required")
 	}
 
 	if !checkHandlerVersion(s.api.h0, handlerV0.Version0) {
@@ -157,6 +182,12 @@ func (s *Server) createRoutes() error {
 	apiv0 := api.Group("v0/")
 
 	apiv0.GET("health", s.api.h0.Health)
+
+	// auth
+	auth := apiv0.Group("auth/")
+	auth.Use(s.api.middleware.CheckToken)
+
+	auth.POST("notes/filter", s.api.h0.FilterNotes)
 
 	s.e = e
 

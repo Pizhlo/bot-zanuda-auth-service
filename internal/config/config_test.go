@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:funlen // длинный тест
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 
@@ -34,6 +35,19 @@ func TestLoadConfig(t *testing.T) {
 					Type: RedisTypeSingle,
 					Host: "localhost",
 					Port: 6379,
+				},
+				Postgres: Postgres{
+					Host:          "localhost",
+					Port:          5432,
+					User:          "user",
+					Password:      "pass",
+					DBName:        "db",
+					InsertTimeout: 5 * time.Second,
+					ReadTimeout:   5 * time.Second,
+				},
+				Auth: Auth{
+					SecretKey:         "your-key",
+					UpdateKeyInterval: 1 * time.Hour,
 				},
 			},
 			wantErr: require.NoError,

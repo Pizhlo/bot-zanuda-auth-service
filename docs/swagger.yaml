@@ -1,4 +1,29 @@
 basePath: /api/v0
+definitions:
+  auth-service_internal_model.FilterNotesRequest:
+    properties:
+      note_ids:
+        items:
+          type: integer
+        type: array
+      space_id:
+        type: integer
+    type: object
+  auth-service_internal_model.FilterNotesResponse:
+    properties:
+      notes:
+        additionalProperties:
+          $ref: '#/definitions/auth-service_internal_model.NoteAccessInfo'
+        type: object
+    type: object
+  auth-service_internal_model.NoteAccessInfo:
+    properties:
+      can_edit:
+        description: может ли пользователь редактировать заметку
+        type: boolean
+      can_read:
+        type: boolean
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -6,6 +31,55 @@ info:
   title: Auth Service API
   version: "1.0"
 paths:
+  /auth/notes/filter:
+    post:
+      consumes:
+      - application/json
+      description: Фильтрует входящий список айди заметок, возвращая только те, которые
+        доступны пользователю (в соответствии с политиками).
+      parameters:
+      - description: Запрос на фильтрацию заметок
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth-service_internal_model.FilterNotesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth-service_internal_model.FilterNotesResponse'
+        "400":
+          description: Некорректный запрос
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Пользователь не авторизован
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Нет доступа к запрошенным заметкам
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Внутренняя ошибка сервера
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Фильтрация записей, доступных пользователю
+      tags:
+      - notes
   /health:
     get:
       description: Проверить состояние сервера и соединения
@@ -13,4 +87,9 @@ paths:
         "200":
           description: OK
       summary: Проверить состояние сервера и соединения
+securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
