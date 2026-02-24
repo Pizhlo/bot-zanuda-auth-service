@@ -6,44 +6,82 @@ on:
       - main
 
 jobs:
-    audit:
-        runs-on: ubuntu-latest
-        steps:
-        - uses: actions/checkout@v4
-    
-        - name: Set up Go
-          uses: actions/setup-go@v5
-          with:
-             go-version: '1.26'
-            
-        - name: Verify dependencies && check go.mod
-          run: make check
+  pytests:
+    uses: ./.github/workflows/pytests.yaml
+    secrets: inherit
 
-        - name: Install linters
-          run: make install-linters
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: Run linters
-          run: make lint
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
 
-    test:
-        runs-on: ubuntu-latest
-        steps:
-          - uses: actions/checkout@v4
+      - name: Verify dependencies && check go.mod
+        run: make check
 
-          - name: Set up Go
-            uses: actions/setup-go@v5
-            with:
-               go-version: '1.26'
+      - name: Install linters
+        run: make install-linters
 
-          - name: Test
-            run: go test -gcflags="-l" -race -v ./...
+      - name: Run linters
+        run: make lint
 
-     # тестовый билд образа
-    build:
-      runs-on: ubuntu-latest     
-      steps:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Test
+        run: go test -gcflags="-l" -race -v ./...
+
+  # тестовый билд образа
+  build:
+    runs-on: ubuntu-latest
+    needs:
+      - audit
+      - test
+      - pytests
+    steps:
       - uses: actions/checkout@v4
       - name: Build the Docker image
         run: docker build . -t pull_request:$(date +%s)
 
-   # далее здесь будут pytests и обновление стенда
+  # пуш образа в Docker Hub
+  push-image:
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO_NAME }}
+          tags: type=raw,value=latest
+          labels: latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

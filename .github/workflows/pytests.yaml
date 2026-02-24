@@ -1,0 +1,156 @@
+name: Pytests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  docker-pytests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Create .env from secrets
+        run: |
+          cat <<EOF > .env
+          VAULT_ADDR=${{ secrets.VAULT_ADDR }}
+          VAULT_DEV_ROOT_TOKEN=${{ secrets.VAULT_DEV_ROOT_TOKEN }}
+          VAULT_PORT=${{ secrets.VAULT_PORT }}
+
+          REDIS_PORT=${{ secrets.REDIS_PORT }}
+
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
+          POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
+
+          AUTH_SERVICE_PORT=${{ secrets.AUTH_SERVICE_PORT }}
+
+          IMAGE_NAME=${{ secrets.IMAGE_NAME }}
+          EOF
+
+      - name: Show .env keys (debug)
+        run: |
+          echo "Generated .env:"
+          sed 's/=.*/=<hidden>/' .env
+
+      - name: Create config-tests.yaml from secret
+        run: |
+          cat <<EOF > config-tests.yaml
+          ${{ secrets.CONFIG }}
+          EOF
+
+      - name: Create config-pytests.yaml from secret
+        run: |
+          cat <<EOF > config-pytests.yaml
+          ${{ secrets.PYTESTS_CONFIG }}
+          EOF
+
+      - name: Create certs for Vault
+        run: make certs
+
+      - name: Run Postgres
+        run: docker compose -f docker-compose.tests.yaml up -d postgres
+
+      - name: Install migrate utility
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/latest/download/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/
+          migrate -version
+
+      - name: Wait for Postgres to be ready
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        run: |
+          echo "🔍 Checking postgres status..."
+
+          echo "containers status:"
+          docker compose -f docker-compose.tests.yaml ps
+          
+          # Check PostgreSQL
+          echo "📊 Waiting for PostgreSQL..."
+          if timeout 60 bash -c 'until docker compose -f docker-compose.tests.yaml exec -T postgres pg_isready -U $POSTGRES_USER -d $POSTGRES_DB; do sleep 2; done'; then
+            echo "✅ PostgreSQL is ready"
+          else
+            echo "❌ PostgreSQL failed to start or is not responding"
+            echo "📋 PostgreSQL container status:"
+            docker compose -f docker-compose.tests.yaml ps postgres
+            echo "📋 PostgreSQL logs:"
+            docker compose -f docker-compose.tests.yaml logs postgres
+            exit 1
+          fi
+        
+      - name: Apply database migrations
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          MIGRATIONS_PATH: ${{ secrets.MIGRATIONS_PATH }}
+        run: |
+          if [ -d "migration" ]; then
+            echo "🔍 Checking migration directory structure..."
+            echo "📁 Contents of migration directory:"
+            ls -la migration/
+            
+            if [ -d "$MIGRATIONS_PATH" ]; then
+              echo "📁 Contents of $MIGRATIONS_PATH:"
+              ls -la "$MIGRATIONS_PATH"
+              
+              # Проверяем наличие up миграций
+              up_files=$(find "$MIGRATIONS_PATH" -name "*.up.sql" | wc -l)
+              if [ "$up_files" -eq 0 ]; then
+                echo "❌ No .up.sql files found in $MIGRATIONS_PATH"
+                echo "📁 Available files:"
+                ls -la "$MIGRATIONS_PATH"
+                exit 1
+              fi
+              
+              echo "🔄 Found $up_files up migration files"
+              echo "🔄 Applying migrations using migrate utility..."
+              
+              # Формируем строку подключения к PostgreSQL
+              DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB?sslmode=disable"
+              
+              # Применяем миграции
+              migrate -path "$MIGRATIONS_PATH" -database "$DATABASE_URL" up
+              
+              if [ $? -eq 0 ]; then
+                echo "🎉 All migrations applied successfully!"
+                echo "📊 Migration status:"
+                migrate -path "$MIGRATIONS_PATH" -database "$DATABASE_URL" version
+              else
+                echo "❌ Failed to apply migrations"
+                exit 1
+              fi
+            else
+              echo "❌ Migration directory $MIGRATIONS_PATH not found"
+              echo "📁 Available directories in migrations:"
+              find migrations -type d
+              exit 1
+            fi
+          else
+            echo "❌ No migrations directory found"
+            exit 1
+          fi
+
+      - name: Fill DB by test data
+        run: make testdata-up
+
+      - name: Run docker tests
+        run: make docker-tests-up
+
+      - name: Stop containers
+        if: always()
+        run: make docker-tests-down

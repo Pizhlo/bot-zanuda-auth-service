@@ -1,0 +1,90 @@
+services:
+  vault:
+    image: hashicorp/vault:1.18
+    container_name: auth-service-vault
+    ports:
+      - "${VAULT_PORT:-8200}:8200"
+    environment:
+      - VAULT_ADDR=${VAULT_ADDR}
+    volumes:
+      - vault_data:/vault/data
+      - ./vault/config.yaml:/vault/config/vault.yaml:ro
+      - ./vault/full-chain.pem:/vault/config/full-chain.pem:ro
+      - ./vault/private-key.pem:/vault/config/private-key.pem:ro
+    cap_add:
+      - IPC_LOCK
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mkdir -p /vault/data
+        exec vault server -config=/vault/config/vault.yaml
+
+  redis:
+    image: "redis:alpine"
+    container_name: auth-service-redis
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+
+  postgres:
+    image: postgres:16
+    container_name: auth-service-postgres-local
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  auth-service:
+    image: pizhlo/bot-zanuda-auth-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "local"
+        BUILD_DATE: "dev"
+        GIT_COMMIT: "dev"
+    volumes:
+      - ./config-tests.yaml:/app/config.yaml:ro
+    depends_on:
+        postgres:
+          condition: service_healthy
+        redis:
+          condition: service_started
+        vault:
+          condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v0/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    ports:
+      - "${AUTH_SERVICE_PORT:-8080}:8080"
+
+  pytests:
+    image: pizhlo/bot-zanuda-pytests:latest
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    volumes:
+      - ./config-pytests.yaml:/app/config.yaml:ro
+    command: make test-auth-service
+
+volumes:
+  vault_data:
+  redis-data:
+  pgdata:

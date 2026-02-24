@@ -291,3 +291,39 @@ testdata-down:
 	@echo "> testdata rolled back"
 
 .PHONY: add-test-user remove-test-user add-test-space remove-test-space add-test-notes remove-test-notes testdata-up testdata-down
+
+# DOCKER
+-include .env
+# Настройки по умолчанию, можно переопределять через env
+REGISTRY ?= docker.io
+IMAGE_TAG ?= latest                   # или $(shell git rev-parse --short HEAD)
+FULL_IMAGE := $(REGISTRY)/$(IMAGE_NAME):$(IMAGE_TAG)
+
+.PHONY: docker-build docker-push docker-login
+docker-build:
+	@VERSION=$$(git describe --tags --always --dirty); \
+	BUILD_DATE=$$(date -u +%Y%m%d-%H%M%SZ); \
+	GIT_COMMIT=$$(git rev-parse --short HEAD); \
+	echo "> docker-build with VERSION=$$VERSION BUILD_DATE=$$BUILD_DATE GIT_COMMIT=$$GIT_COMMIT"; \
+	docker build \
+		-f Dockerfile \
+		--build-arg VERSION=$$VERSION \
+		--build-arg BUILD_DATE=$$BUILD_DATE \
+		--build-arg GIT_COMMIT=$$GIT_COMMIT \
+		-t $(FULL_IMAGE) .
+
+docker-push:
+	docker push $(FULL_IMAGE)
+
+# Опционально: логин, чтобы не писать руками
+docker-login:
+	@echo "Logging in to $(REGISTRY)..."
+	docker login $(REGISTRY)
+
+docker-tests-up:
+	docker compose -f docker-compose.tests.yaml up --build --abort-on-container-exit --exit-code-from pytests
+
+docker-tests-down:
+	docker compose -f docker-compose.tests.yaml down
+
+.PHONY: docker-build docker-push docker-login docker-tests-up docker-tests-down
