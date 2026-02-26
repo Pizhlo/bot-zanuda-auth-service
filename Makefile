@@ -248,7 +248,7 @@ migrate-down:
 .PHONY: migrate-up migrate-down add-test-user remove-test-user testdata-up testdata-down
 
 # Тестовые данные: список имён (без .up.sql/.down.sql), порядок = порядок накатывания
-TESTDATA_ENTRIES := test_user test_space test_notes
+TESTDATA_ENTRIES := test_user test_space test_notes test_shared_space
 
 add-test-user:
 	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.up.sql
@@ -326,4 +326,4 @@ docker-tests-up:
 docker-tests-down:
 	docker compose -f docker-compose.tests.yaml down
 
-.PHONY: docker-build docker-push docker-login docker-tests-up docker-tests-down
+.PHONY: docker-tests-up docker-tests-down

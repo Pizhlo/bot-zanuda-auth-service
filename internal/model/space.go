@@ -28,13 +28,13 @@ type RoleCode string
 
 const (
 	// OwnerRoleCode - владелец пространства. Имеет самые широкие разрешения, ему доступно все.
-	OwnerRoleCode = "OWNER"
+	OwnerRoleCode RoleCode = "OWNER"
 	// AdminRoleCode - админ пространства. Чуть меньше, чем владелец: ему недоступно только управление ролями.
-	AdminRoleCode = "ADMIN"
+	AdminRoleCode RoleCode = "ADMIN"
 	// EditorRoleCode - стандартная роль: можно просматривать и редактировать контент, но нельзя управлять пространством.
-	EditorRoleCode = "EDITOR"
+	EditorRoleCode RoleCode = "EDITOR"
 	// ViewerRoleCode - самая минимальная роль. Доступен только просмотр контента, ничего редактировать и удалять нельзя.
-	ViewerRoleCode = "VIEWER"
+	ViewerRoleCode RoleCode = "VIEWER"
 )
 
 // MemberStatus - статус участника пространства.
@@ -54,9 +54,16 @@ const (
 type SpaceMember struct {
 	UserID    int
 	IsMember  bool
-	RoleCode  string // OWNER / ADMIN / EDITOR / VIEWER / ...
+	RoleCode  RoleCode // OWNER / ADMIN / EDITOR / VIEWER / ...
 	InvitedBy int
 	Status    MemberStatus
 	CanInvite bool
 	CreatedAt time.Time
+}
+
+// CanEditSpaceNote отвечает, может ли участник редактировать заметки с visibility=SPACE.
+//
+// Сейчас: все, кроме VIEWER. В будущем можно завязать на permissions (NOTE_EDIT_ANY / NOTE_EDIT_OWN).
+func (m SpaceMember) CanEditSpaceNote() bool {
+	return m.RoleCode != ViewerRoleCode
 }

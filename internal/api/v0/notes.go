@@ -35,24 +35,29 @@ func (s *Handler) FilterNotes(c echo.Context) error {
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {
+		logrus.WithError(err).Error("error reading body")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot read body"})
 	}
 
 	err = json.Unmarshal(body, &req)
 	if err != nil {
+		logrus.WithError(err).Error("error unmarshaling body")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot unmarshal body"})
 	}
 
 	if len(req.NoteIDs) == 0 {
+		logrus.Debug("empty note id list")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty note id list"})
 	}
 
 	if req.SpaceID < 1 {
+		logrus.Debug("invalid space id")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty space id"})
 	}
 
 	userID, ok := userIDFromContext(c.Request().Context())
 	if !ok {
+		logrus.Debug("no user in context")
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no user in context"})
 	}
 
