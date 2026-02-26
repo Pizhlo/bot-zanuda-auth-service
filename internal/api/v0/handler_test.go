@@ -23,7 +23,7 @@ func TestNew(t *testing.T) {
 		buildDate string
 		gitCommit string
 		wantErr   require.ErrorAssertionFunc
-		makeWant  func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler
+		makeWant  func(politicsSvc *mocks.MockPoliticsService) *Handler
 	}
 
 	tests := []test{
@@ -33,13 +33,13 @@ func TestNew(t *testing.T) {
 			buildDate: "2021-01-01",
 			gitCommit: "1234567890",
 			wantErr:   require.NoError,
-			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+			makeWant: func(politicsSvc *mocks.MockPoliticsService) *Handler {
 				return &Handler{
 					version:         "1.0.0",
 					buildDate:       "2021-01-01",
 					gitCommit:       "1234567890",
 					apiVersion:      Version0,
-					PoliticsService: &politicsSvc,
+					PoliticsService: politicsSvc,
 				}
 			},
 		},
@@ -52,7 +52,7 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "version is required")
 			},
-			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+			makeWant: func(politicsSvc *mocks.MockPoliticsService) *Handler {
 				t.Helper()
 
 				return nil
@@ -67,7 +67,7 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "buildDate is required")
 			},
-			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+			makeWant: func(politicsSvc *mocks.MockPoliticsService) *Handler {
 				t.Helper()
 
 				return nil
@@ -82,7 +82,7 @@ func TestNew(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "gitCommit is required")
 			},
-			makeWant: func(authSvc mocks.MockAuthService, politicsSvc mocks.MockPoliticsService) *Handler {
+			makeWant: func(politicsSvc *mocks.MockPoliticsService) *Handler {
 				t.Helper()
 
 				return nil
@@ -97,7 +97,6 @@ func TestNew(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			authSvc := mocks.NewMockAuthService(ctrl)
 			politicsSvc := mocks.NewMockPoliticsService(ctrl)
 
 			handler, err := New(
@@ -108,7 +107,7 @@ func TestNew(t *testing.T) {
 			)
 
 			tt.wantErr(t, err)
-			assert.Equal(t, tt.makeWant(*authSvc, *politicsSvc), handler)
+			assert.Equal(t, tt.makeWant(politicsSvc), handler)
 		})
 	}
 }

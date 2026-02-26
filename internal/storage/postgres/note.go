@@ -1,6 +1,7 @@
 package politics
 
 import (
+	"auth-service/internal/model"
 	"context"
 	"fmt"
 
@@ -41,6 +42,46 @@ WHERE space_id = $1
 		}
 
 		res = append(res, id)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("rows error: %w", rows.Err())
+	}
+
+	return res, nil
+}
+
+// GetNotesVisibility возвращает информацию об уровнях видимости заметок.
+func (db *Repo) GetNotesVisibility(ctx context.Context, ids []int) ([]model.NoteVisibility, error) {
+	ctxTimeout, cancel := context.WithTimeout(ctx, db.readTimeout)
+	defer cancel()
+
+	q := `SELECT id, visibility_type
+FROM notes.notes
+WHERE id = ANY($1);`
+
+	res := make([]model.NoteVisibility, 0, len(ids))
+
+	rows, err := db.db.QueryContext(ctxTimeout, q, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("error getting notes visibility: %w", err)
+	}
+
+	defer func() {
+		if err := rows.Close(); err != nil {
+			logrus.Errorf("GetNotesVisibility: error closing rows: %v", err)
+		}
+	}()
+
+	for rows.Next() {
+		var note model.NoteVisibility
+
+		err := rows.Scan(&note.ID, &note.Visibility)
+		if err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
+		}
+
+		res = append(res, note)
 	}
 
 	if rows.Err() != nil {

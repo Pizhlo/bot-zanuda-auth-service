@@ -23,7 +23,7 @@ type Handler struct {
 
 // PoliticsService - интерфейс для доступа к сервису политик. Отвечает за доступ пользователей к данным.
 //
-//go:generate mockgen -source=handler.go -destination=mocks/mocks.go -package=mocks PoliticsService
+//go:generate mockgen -source=handler.go -destination=mocks/politics_svc_mock.go -package=mocks PoliticsService
 type PoliticsService interface {
 	// FilterNotes фильтрует входящие заметки согласно политикам.
 	// Возвращает только заметки, доступные пользователю, с флагом canEdit -

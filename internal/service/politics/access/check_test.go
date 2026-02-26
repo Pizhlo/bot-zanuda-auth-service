@@ -37,7 +37,7 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 					GetSpaceMember(gomock.Any(), gomock.Any(), gomock.Any()).
 					Return(model.SpaceMember{
 						UserID:   1,
-						RoleCode: string(model.EditorRoleCode),
+						RoleCode: model.EditorRoleCode,
 						Status:   model.ActiveMemberStatus,
 					}, nil)
 
@@ -46,7 +46,7 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 			want: model.SpaceMember{
 				UserID:   1,
 				IsMember: true,
-				RoleCode: string(model.EditorRoleCode),
+				RoleCode: model.EditorRoleCode,
 				Status:   model.ActiveMemberStatus,
 			},
 			wantErr: require.NoError,

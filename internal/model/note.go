@@ -19,3 +19,23 @@ type NoteAccessInfo struct {
 type FilterNotesResponse struct {
 	Notes map[int]NoteAccessInfo `json:"notes"`
 }
+
+// VisibilityType - уровень видимости заметки.
+type VisibilityType string
+
+const (
+	// VisibilityTypeSpace - уровень видимости на все пространство.
+	// Запись доступна всем, если не указано иначе правами.
+	VisibilityTypeSpace VisibilityType = "SPACE"
+	// VisibilityTypePrivateToAuthor - уровень видимости, при котором запись видна только автору.
+	VisibilityTypePrivateToAuthor VisibilityType = "PRIVATE_TO_AUTHOR"
+	// VisibilityTypeCustom - уровень видимости, при котором доступ к записи установлен индивидуально:
+	// каким-то пользователям можно смотреть, каким-то - нет. Информация об этом лежит в таблице notes.notes_acl.
+	VisibilityTypeCustom VisibilityType = "CUSTOM"
+)
+
+// NoteVisibility - модель для хранения информации об уровне видимости заметки.
+type NoteVisibility struct {
+	ID         int            // id заметки
+	Visibility VisibilityType // уровень видимости: SPACE, PRIVATE_TO_AUTHOR, CUSTOM
+}

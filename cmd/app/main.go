@@ -90,7 +90,7 @@ func main() {
 	defer butler.stop(ctx, repo)
 
 	spaceAccessChecker := initSpaceAccessChecker(repo)
-	notePermissionResolver := initNotePermissionResolver()
+	notePermissionResolver := initNotePermissionResolver(repo)
 
 	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
 
@@ -195,11 +195,13 @@ func initSpaceAccessChecker(storage *repo.Repo) *access.SpaceAccessChecker {
 	)
 }
 
-func initNotePermissionResolver() *permissions.NotePermissionResolver {
+func initNotePermissionResolver(storage *repo.Repo) *permissions.NotePermissionResolver {
 	logrus.Info("initializing note permission resolver")
 
 	return start(
-		permissions.NewNotePermissionResolver(), nil,
+		permissions.NewNotePermissionResolver(
+			permissions.WithStorage(storage),
+		),
 	)
 }
 
