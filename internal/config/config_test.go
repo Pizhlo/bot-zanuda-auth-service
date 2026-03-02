@@ -49,6 +49,9 @@ func TestLoadConfig(t *testing.T) {
 					SecretKey:         "your-key",
 					UpdateKeyInterval: 1 * time.Hour,
 				},
+				Policy: Policy{
+					Config: "casbin_model.conf",
+				},
 			},
 			wantErr: require.NoError,
 		},

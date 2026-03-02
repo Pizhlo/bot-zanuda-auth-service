@@ -4,6 +4,9 @@ server:
   port: 8080
   shutdown_timeout: 100ms
 
+policy:
+  config: casbin_model.conf
+
 auth:
   update_key_interval: 1h
   secret_key: your-key
