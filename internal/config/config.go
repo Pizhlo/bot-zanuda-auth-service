@@ -18,6 +18,7 @@ type Config struct {
 	Redis    Redis    `yaml:"redis" validate:"required"`
 	Postgres Postgres `yaml:"postgres" validate:"required"`
 	Auth     Auth     `yaml:"auth" validate:"required"`
+	Policy   Policy   `yaml:"policy" validate:"required"`
 }
 
 // Auth - данные для работы Auth-сервиса.
@@ -72,6 +73,12 @@ type Postgres struct {
 	DBName        string        `yaml:"db_name" validate:"required"`
 	InsertTimeout time.Duration `yaml:"insert_timeout" validate:"required,min=1"`
 	ReadTimeout   time.Duration `yaml:"read_timeout" validate:"required,min=1"`
+}
+
+// Policy - конфигурация политики.
+type Policy struct {
+	// Config - конфигурация модели для Casbin.
+	Config string `yaml:"config" validate:"required"`
 }
 
 // LoadConfig загружает конфигурацию.

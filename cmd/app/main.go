@@ -6,6 +6,7 @@ import (
 	"auth-service/internal/config"
 	"auth-service/internal/server"
 	"auth-service/internal/service/auth"
+	"auth-service/internal/service/enforcer"
 	"auth-service/internal/service/politics"
 	"auth-service/internal/service/politics/access"
 	"auth-service/internal/service/politics/permissions"
@@ -105,6 +106,14 @@ func main() {
 	redis := initRedisStorage(ctx, config.Redis)
 	defer butler.stop(ctx, redis)
 
+	enf := initEnforcer(config)
+
+	go butler.start(func() error {
+		return enf.Run(notifyCtx)
+	})
+
+	defer butler.stop(ctx, enf)
+
 	logrus.Info("all services started")
 
 	// Ждем сигнал завершения
@@ -114,6 +123,14 @@ func main() {
 	// Ждем завершения всех горутин
 	butler.waitForAll()
 	logrus.Info("all services stopped")
+}
+
+func initEnforcer(cfg *config.Config) *enforcer.Enforcer {
+	logrus.Info("initializing enforcer")
+
+	dsn := formatPostgresAddr(cfg.Postgres)
+
+	return start(enforcer.NewEnforcer(enforcer.WithDsn(dsn), enforcer.WithModelConf(cfg.Policy.Config)))
 }
 
 func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
