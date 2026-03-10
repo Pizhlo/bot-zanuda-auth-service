@@ -45,3 +45,12 @@ INSERT INTO notes.notes (space_id, author_id) VALUES (
 INSERT INTO notes.notes (space_id, author_id) VALUES (
     2, 3 -- EDITOR
 );
+
+-- заметка с кастомной видимостью: видна всем, кроме ADMIN
+INSERT INTO notes.notes (id, space_id, author_id, visibility_type) VALUES (
+    'fa4885e4-2cdf-4986-9a1a-16364afd2dce', 2, 1, 'CUSTOM'
+);
+
+INSERT INTO notes.note_acl (note_id, user_id, access) VALUES (
+    'fa4885e4-2cdf-4986-9a1a-16364afd2dce', 2, 'DENY'
+);

@@ -2,9 +2,12 @@ package permissions
 
 import (
 	"auth-service/internal/model"
+	db "auth-service/internal/storage"
 	"context"
 	"errors"
+	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,7 +19,11 @@ type NotePermissionResolver struct {
 //go:generate mockgen -source=note.go -destination=mocks/mocks.go -package=mocks
 type storage interface {
 	// GetNotesVisibility возвращает информацию об уровнях видимости заметок.
-	GetNotesVisibility(ctx context.Context, ids []int) ([]model.NoteVisibility, error)
+	GetNotesVisibility(ctx context.Context, ids []uuid.UUID) ([]model.NoteVisibility, error)
+	// GetNoteACL возвращает информацию о доступе к заметке.
+	// Проверяет, есть ли в ACL запись для пользователя и заметки.
+	// Если заметки нет в ACL - пользователь может читать и редактировать заметку.
+	GetNoteACL(ctx context.Context, userID int, noteID uuid.UUID) (model.NoteACL, error)
 }
 
 type option func(*NotePermissionResolver)
@@ -45,7 +52,7 @@ func NewNotePermissionResolver(opts ...option) (*NotePermissionResolver, error) 
 
 // ResolveNotePermissions определяет, к каким заметкам у пользователя есть доступ. Возвращает мапу по айди с указанием, какие
 // заметки можно читать, какие - редактировать.
-func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, member model.SpaceMember, noteIDs []int) (map[int]model.NoteAccessInfo, error) {
+func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, member model.SpaceMember, noteIDs []uuid.UUID) (map[uuid.UUID]model.NoteAccessInfo, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"user_id":   member.UserID,
 		"note_ids":  noteIDs,
@@ -68,9 +75,13 @@ func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, mem
 	}
 
 	// применяем “движок” правил
-	res := make(map[int]model.NoteAccessInfo, len(visibilities))
+	res := make(map[uuid.UUID]model.NoteAccessInfo, len(visibilities))
 	for _, v := range visibilities {
-		info := decideNoteAccess(member, v)
+		info, err := s.decideNoteAccess(ctx, member, v)
+		if err != nil {
+			return nil, fmt.Errorf("error deciding note access: %v", err)
+		}
+
 		if info.CanRead || info.CanEdit {
 			res[v.ID] = info
 		}
@@ -89,19 +100,19 @@ func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, mem
 var denyAll = model.NoteAccessInfo{}
 
 // decideNoteAccess применяет правила доступа к одной заметке.
-func decideNoteAccess(member model.SpaceMember, v model.NoteVisibility) model.NoteAccessInfo {
+func (s *NotePermissionResolver) decideNoteAccess(ctx context.Context, member model.SpaceMember, v model.NoteVisibility) (model.NoteAccessInfo, error) {
 	// В будущем сюда легко добавить проверку:
 	// - member.HasPermission("NOTE_VIEW_ALL")
 	// - member.HasPermission("NOTE_EDIT_ANY")
 	// - note ACL, и т.д.
 	switch v.Visibility {
 	case model.VisibilityTypeSpace:
-		return accessForSpaceVisibility(member)
-	// case model.VisibilityTypePrivateToAuthor:
-	// case model.VisibilityTypeCustom:
-	//   сюда добавишь, когда дойдёшь
+		return accessForSpaceVisibility(member), nil
+
+	case model.VisibilityTypeCustom:
+		return s.accessForCustomVisibility(ctx, member, v)
 	default:
-		return denyAll
+		return denyAll, nil
 	}
 }
 
@@ -117,9 +128,36 @@ func accessForSpaceVisibility(member model.SpaceMember) model.NoteAccessInfo {
 	}
 }
 
+func (s *NotePermissionResolver) accessForCustomVisibility(ctx context.Context, member model.SpaceMember, v model.NoteVisibility) (model.NoteAccessInfo, error) {
+	access, err := s.storage.GetNoteACL(ctx, member.UserID, v.ID)
+	if err != nil {
+		// политики для заметки не найдены - пользователю разрешено ее смотреть
+		if errors.Is(err, db.ErrNotFound) {
+			return model.NoteAccessInfo{
+				CanRead: true,
+				CanEdit: true,
+			}, nil
+		}
+		return model.NoteAccessInfo{}, fmt.Errorf("error getting note ACL: %v", err)
+	}
+
+	// если заметка запрещена - сразу выходим
+	if !access.Allowed() {
+		return model.NoteAccessInfo{
+			CanRead: false,
+			CanEdit: false,
+		}, nil
+	}
+
+	return model.NoteAccessInfo{
+		CanRead: access.CanRead,
+		CanEdit: access.CanEdit,
+	}, nil
+}
+
 // grantSameAccessToAllNotes возвращает мапу с переданными айди, указывая для всех переданные флаги canEdit и canRead.
-func grantSameAccessToAllNotes(noteIDs []int, canRead, canEdit bool) map[int]model.NoteAccessInfo {
-	res := make(map[int]model.NoteAccessInfo, len(noteIDs))
+func grantSameAccessToAllNotes(noteIDs []uuid.UUID, canRead, canEdit bool) map[uuid.UUID]model.NoteAccessInfo {
+	res := make(map[uuid.UUID]model.NoteAccessInfo, len(noteIDs))
 	info := model.NoteAccessInfo{CanRead: canRead, CanEdit: canEdit}
 
 	for _, id := range noteIDs {

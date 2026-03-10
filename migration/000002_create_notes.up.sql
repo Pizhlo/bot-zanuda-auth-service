@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS notes;
 -- это не основная таблица с заметками, здесь содержится только информация, 
 -- необходимая для реализации политик
 CREATE TABLE IF NOT EXISTS notes.notes (
-    id              BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     space_id        BIGINT NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
     author_id       BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
@@ -45,7 +45,7 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS notes.note_acl (
     id          BIGSERIAL PRIMARY KEY,
-    note_id     BIGINT NOT NULL REFERENCES notes.notes(id) ON DELETE CASCADE,
+    note_id     UUID NOT NULL REFERENCES notes.notes(id) ON DELETE CASCADE,
     user_id     BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
     access      note_acl_access NOT NULL,  -- ALLOW / DENY
