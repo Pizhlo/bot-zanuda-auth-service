@@ -10,6 +10,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 )
 
 // MockspacesRepo is a mock of spacesRepo interface.
@@ -36,7 +37,7 @@ func (m *MockspacesRepo) EXPECT() *MockspacesRepoMockRecorder {
 }
 
 // GetSpaceMember mocks base method.
-func (m *MockspacesRepo) GetSpaceMember(ctx context.Context, userID, spaceID int) (model.SpaceMember, error) {
+func (m *MockspacesRepo) GetSpaceMember(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetSpaceMember", ctx, userID, spaceID)
 	ret0, _ := ret[0].(model.SpaceMember)

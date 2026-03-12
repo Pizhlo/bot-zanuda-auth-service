@@ -69,7 +69,7 @@ type Postgres struct {
 	Host          string        `yaml:"host" validate:"required"`
 	Port          int           `yaml:"port" validate:"required,min=1024,max=65535"`
 	User          string        `yaml:"user" validate:"required"`
-	Password      string        `yaml:"password" validate:"required"` //nolint:gosec // G117: нужно экспортировать для парсинга конфига из YAML
+	Password      string        `yaml:"password" validate:"required"`
 	DBName        string        `yaml:"db_name" validate:"required"`
 	InsertTimeout time.Duration `yaml:"insert_timeout" validate:"required,min=1"`
 	ReadTimeout   time.Duration `yaml:"read_timeout" validate:"required,min=1"`

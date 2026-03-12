@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,7 +17,7 @@ type NotePermissionResolver struct {
 //go:generate mockgen -source=note.go -destination=mocks/mocks.go -package=mocks
 type storage interface {
 	// GetNotesVisibility возвращает информацию об уровнях видимости заметок.
-	GetNotesVisibility(ctx context.Context, ids []int) ([]model.NoteVisibility, error)
+	GetNotesVisibility(ctx context.Context, ids []uuid.UUID) ([]model.NoteVisibility, error)
 }
 
 type option func(*NotePermissionResolver)
@@ -45,7 +46,7 @@ func NewNotePermissionResolver(opts ...option) (*NotePermissionResolver, error) 
 
 // ResolveNotePermissions определяет, к каким заметкам у пользователя есть доступ. Возвращает мапу по айди с указанием, какие
 // заметки можно читать, какие - редактировать.
-func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, member model.SpaceMember, noteIDs []int) (map[int]model.NoteAccessInfo, error) {
+func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, member model.SpaceMember, noteIDs []uuid.UUID) (map[uuid.UUID]model.NoteAccessInfo, error) {
 	logger := logrus.WithFields(logrus.Fields{
 		"user_id":   member.UserID,
 		"note_ids":  noteIDs,
@@ -68,7 +69,7 @@ func (s *NotePermissionResolver) ResolveNotePermissions(ctx context.Context, mem
 	}
 
 	// применяем “движок” правил
-	res := make(map[int]model.NoteAccessInfo, len(visibilities))
+	res := make(map[uuid.UUID]model.NoteAccessInfo, len(visibilities))
 	for _, v := range visibilities {
 		info := decideNoteAccess(member, v)
 		if info.CanRead || info.CanEdit {
@@ -118,8 +119,8 @@ func accessForSpaceVisibility(member model.SpaceMember) model.NoteAccessInfo {
 }
 
 // grantSameAccessToAllNotes возвращает мапу с переданными айди, указывая для всех переданные флаги canEdit и canRead.
-func grantSameAccessToAllNotes(noteIDs []int, canRead, canEdit bool) map[int]model.NoteAccessInfo {
-	res := make(map[int]model.NoteAccessInfo, len(noteIDs))
+func grantSameAccessToAllNotes(noteIDs []uuid.UUID, canRead, canEdit bool) map[uuid.UUID]model.NoteAccessInfo {
+	res := make(map[uuid.UUID]model.NoteAccessInfo, len(noteIDs))
 	info := model.NoteAccessInfo{CanRead: canRead, CanEdit: canEdit}
 
 	for _, id := range noteIDs {

@@ -1,11 +1,13 @@
 package model
 
+import "github.com/google/uuid"
+
 // FilterNotesRequest - запрос на фильтрацию списка запрашиваемых заметок.
 // UserID передается в токене.
 type FilterNotesRequest struct {
-	UserID  int   `json:"-"`
-	SpaceID int   `json:"space_id"`
-	NoteIDs []int `json:"note_ids"`
+	UserID  uuid.UUID   `json:"-"`
+	SpaceID uuid.UUID   `json:"space_id"`
+	NoteIDs []uuid.UUID `json:"note_ids"`
 }
 
 // NoteAccessInfo - информация о доступе пользователя к заметке.
@@ -15,9 +17,9 @@ type NoteAccessInfo struct {
 }
 
 // FilterNotesResponse - ответ на запрос FilterNotesRequest.
-// Объект-словарь, где ключ — ID заметки (строкой), значение — объект с флагом CanEdit.
+// Объект-словарь, где ключ — ID заметки, значение — объект с флагом CanEdit.
 type FilterNotesResponse struct {
-	Notes map[int]NoteAccessInfo `json:"notes"`
+	Notes map[uuid.UUID]NoteAccessInfo `json:"notes"`
 }
 
 // VisibilityType - уровень видимости заметки.
@@ -36,6 +38,6 @@ const (
 
 // NoteVisibility - модель для хранения информации об уровне видимости заметки.
 type NoteVisibility struct {
-	ID         int            // id заметки
+	ID         uuid.UUID      // id заметки
 	Visibility VisibilityType // уровень видимости: SPACE, PRIVATE_TO_AUTHOR, CUSTOM
 }

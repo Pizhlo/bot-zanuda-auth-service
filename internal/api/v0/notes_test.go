@@ -7,12 +7,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,39 +28,43 @@ func TestHandler_FilterNotes(t *testing.T) {
 		resp   *model.FilterNotesResponse
 	}
 
+	spaceID := uuid.New()
+	userID := uuid.New()
+
+	note1 := uuid.New()
+	note2 := uuid.New()
+
+	noteIDs := []uuid.UUID{note1, note2}
+
 	tests := []struct {
 		name         string
 		body         any
-		userID       *int
+		userID       string
 		prepareMocks func(ps *mocks.MockPoliticsService)
 		checkWant    func(actual wantResponse)
 	}{
 		{
 			name: "positive case: notes filtered successfully",
 			body: model.FilterNotesRequest{
-				SpaceID: 1,
-				NoteIDs: []int{1, 2, 3},
+				SpaceID: spaceID,
+				NoteIDs: noteIDs,
 			},
-			userID: func() *int { v := 42; return &v }(),
+			userID: userID.String(),
 			prepareMocks: func(ps *mocks.MockPoliticsService) {
 				ps.EXPECT().
-					FilterNotes(gomock.Any(), model.FilterNotesRequest{
-						UserID:  42,
-						SpaceID: 1,
-						NoteIDs: []int{1, 2, 3},
-					}).
-					Return(map[int]model.NoteAccessInfo{
-						1: {CanRead: true, CanEdit: true},
-						2: {CanRead: true, CanEdit: false},
+					FilterNotes(gomock.Any(), gomock.Any()).
+					Return(map[uuid.UUID]model.NoteAccessInfo{
+						note1: {CanRead: true, CanEdit: true},
+						note2: {CanRead: true, CanEdit: false},
 					}, nil)
 			},
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusOK, actual.status)
 				assert.Equal(t, "", actual.errMsg)
 				assert.Equal(t, &model.FilterNotesResponse{
-					Notes: map[int]model.NoteAccessInfo{
-						1: {CanRead: true, CanEdit: true},
-						2: {CanRead: true, CanEdit: false},
+					Notes: map[uuid.UUID]model.NoteAccessInfo{
+						note1: {CanRead: true, CanEdit: true},
+						note2: {CanRead: true, CanEdit: false},
 					},
 				}, actual.resp)
 			},
@@ -68,10 +72,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 		{
 			name: "bad request: empty note id list",
 			body: model.FilterNotesRequest{
-				SpaceID: 1,
-				NoteIDs: []int{},
+				SpaceID: spaceID,
+				NoteIDs: []uuid.UUID{},
 			},
-			userID: func() *int { v := 1; return &v }(),
+			userID: userID.String(),
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusBadRequest, actual.status)
 				assert.Equal(t, "empty note id list", actual.errMsg)
@@ -80,10 +84,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 		{
 			name: "bad request: empty space id",
 			body: model.FilterNotesRequest{
-				SpaceID: -11,
-				NoteIDs: []int{1, 2, 3},
+				SpaceID: uuid.UUID{},
+				NoteIDs: noteIDs,
 			},
-			userID: func() *int { v := 1; return &v }(),
+			userID: userID.String(),
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusBadRequest, actual.status)
 				assert.Equal(t, "empty space id", actual.errMsg)
@@ -92,10 +96,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 		{
 			name: "unauthorized: no user in context",
 			body: model.FilterNotesRequest{
-				SpaceID: 1,
-				NoteIDs: []int{1, 2, 3},
+				SpaceID: spaceID,
+				NoteIDs: noteIDs,
 			},
-			userID: nil,
+			userID: "",
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusUnauthorized, actual.status)
 				assert.Equal(t, "no user in context", actual.errMsg)
@@ -104,10 +108,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 		{
 			name: "forbidden: user is not member",
 			body: model.FilterNotesRequest{
-				SpaceID: 1,
-				NoteIDs: []int{1, 2, 3},
+				SpaceID: spaceID,
+				NoteIDs: noteIDs,
 			},
-			userID: func() *int { v := 1; return &v }(),
+			userID: userID.String(),
 			prepareMocks: func(ps *mocks.MockPoliticsService) {
 				ps.EXPECT().
 					FilterNotes(gomock.Any(), gomock.Any()).
@@ -121,10 +125,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 		{
 			name: "internal error: service error",
 			body: model.FilterNotesRequest{
-				SpaceID: 1,
-				NoteIDs: []int{1, 2, 3},
+				SpaceID: spaceID,
+				NoteIDs: noteIDs,
 			},
-			userID: func() *int { v := 1; return &v }(),
+			userID: userID.String(),
 			prepareMocks: func(ps *mocks.MockPoliticsService) {
 				ps.EXPECT().
 					FilterNotes(gomock.Any(), gomock.Any()).
@@ -164,13 +168,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 			bodyBytes, err := json.Marshal(tt.body)
 			require.NoError(t, err)
 
-			req := httptest.NewRequest(http.MethodPost, "/auth/notes/filter", bytes.NewReader(bodyBytes))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/notes/filter", bytes.NewReader(bodyBytes))
 			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 
-			ctx := req.Context()
-			if tt.userID != nil {
-				ctx = withUserID(ctx, *tt.userID)
-			}
+			ctx := withUserID(req.Context(), tt.userID)
 
 			req = req.WithContext(ctx)
 
@@ -187,31 +188,12 @@ func TestHandler_FilterNotes(t *testing.T) {
 
 			_ = json.Unmarshal(body, &errResp)
 
-			// Пытаемся распарсить успешный ответ с заметками.
-			type rawResponse struct {
-				Notes map[string]model.NoteAccessInfo `json:"notes"`
-			}
-
-			var raw rawResponse
-
-			_ = json.Unmarshal(body, &raw)
-
 			resp := &model.FilterNotesResponse{
 				Notes: nil,
 			}
 
-			if len(raw.Notes) > 0 {
-				resp.Notes = make(map[int]model.NoteAccessInfo, len(raw.Notes))
-				for k, v := range raw.Notes {
-					// ключи приходят строками, конвертируем в int
-					var id int
-
-					_, convErr := fmt.Sscanf(k, "%d", &id)
-					require.NoError(t, convErr)
-
-					resp.Notes[id] = v
-				}
-			}
+			err = json.Unmarshal(body, &resp)
+			require.NoError(t, err)
 
 			actual := wantResponse{
 				status: rec.Code,
@@ -222,4 +204,37 @@ func TestHandler_FilterNotes(t *testing.T) {
 			tt.checkWant(actual)
 		})
 	}
+}
+
+func TestUserIDFromContext(t *testing.T) {
+	t.Parallel()
+
+	ctx := withUserID(t.Context(), "123")
+	id, ok := userIDFromContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "123", id)
+
+	ctx = t.Context()
+	id, ok = userIDFromContext(ctx)
+	assert.False(t, ok)
+	assert.Equal(t, "", id)
+}
+
+func TestParseUserID(t *testing.T) {
+	t.Parallel()
+
+	id := parseUserID("123")
+	assert.Equal(t, "123", id)
+
+	id = parseUserID(123)
+	assert.Equal(t, "", id)
+}
+
+func TestWithUserID(t *testing.T) {
+	t.Parallel()
+
+	ctx := withUserID(t.Context(), "123")
+	id, ok := userIDFromContext(ctx)
+	assert.True(t, ok)
+	assert.Equal(t, "123", id)
 }

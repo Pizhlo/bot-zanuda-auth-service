@@ -23,14 +23,14 @@ CREATE SCHEMA IF NOT EXISTS notes;
 -- это не основная таблица с заметками, здесь содержится только информация, 
 -- необходимая для реализации политик
 CREATE TABLE IF NOT EXISTS notes.notes (
-    id              BIGSERIAL PRIMARY KEY,
-    space_id        BIGINT NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    author_id       BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    space_id        uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
+    author_id       uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
     visibility_type note_visibility_type NOT NULL DEFAULT 'SPACE',
 
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ
 );
 
 -- ACL для заметок (исключения: скрыть/дать доп.права конкретному юзеру)
@@ -45,8 +45,8 @@ END $$;
 
 CREATE TABLE IF NOT EXISTS notes.note_acl (
     id          BIGSERIAL PRIMARY KEY,
-    note_id     BIGINT NOT NULL REFERENCES notes.notes(id) ON DELETE CASCADE,
-    user_id     BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    note_id     uuid NOT NULL REFERENCES notes.notes(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
     access      note_acl_access NOT NULL,  -- ALLOW / DENY
     can_read    BOOLEAN,                   -- NULL = не переопределяем

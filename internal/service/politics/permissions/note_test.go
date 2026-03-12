@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,13 +96,19 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 
 	type args struct {
 		access  model.SpaceMember
-		noteIDs []int
+		noteIDs []uuid.UUID
 	}
+
+	note1 := uuid.New()
+	note2 := uuid.New()
+	note3 := uuid.New()
+
+	noteIDs := []uuid.UUID{note1, note2, note3}
 
 	tests := []struct {
 		name       string
 		args       args
-		want       map[int]model.NoteAccessInfo
+		want       map[uuid.UUID]model.NoteAccessInfo
 		setupMocks func(ctrl *gomock.Controller) *mocks.Mockstorage
 		wantErr    require.ErrorAssertionFunc
 	}{
@@ -111,13 +118,13 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 				access: model.SpaceMember{
 					RoleCode: model.OwnerRoleCode,
 				},
-				noteIDs: []int{1, 2, 3},
+				noteIDs: noteIDs,
 			},
 			setupMocks: mocks.NewMockstorage,
-			want: map[int]model.NoteAccessInfo{
-				1: {CanRead: true, CanEdit: true},
-				2: {CanRead: true, CanEdit: true},
-				3: {CanRead: true, CanEdit: true},
+			want: map[uuid.UUID]model.NoteAccessInfo{
+				note1: {CanRead: true, CanEdit: true},
+				note2: {CanRead: true, CanEdit: true},
+				note3: {CanRead: true, CanEdit: true},
 			},
 			wantErr: require.NoError,
 		},
@@ -127,7 +134,7 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 				access: model.SpaceMember{
 					RoleCode: model.EditorRoleCode,
 				},
-				noteIDs: []int{1, 2, 3},
+				noteIDs: noteIDs,
 			},
 			setupMocks: func(ctrl *gomock.Controller) *mocks.Mockstorage {
 				storage := mocks.NewMockstorage(ctrl)
@@ -135,15 +142,15 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 				storage.EXPECT().GetNotesVisibility(gomock.Any(), gomock.Any()).Return(
 					[]model.NoteVisibility{
 						{
-							ID:         1,
+							ID:         note1,
 							Visibility: model.VisibilityTypeSpace,
 						},
 						{
-							ID:         2,
+							ID:         note2,
 							Visibility: model.VisibilityTypeSpace,
 						},
 						{
-							ID:         3,
+							ID:         note3,
 							Visibility: model.VisibilityTypeSpace,
 						},
 					}, nil,
@@ -151,16 +158,16 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 
 				return storage
 			},
-			want: map[int]model.NoteAccessInfo{
-				1: {
+			want: map[uuid.UUID]model.NoteAccessInfo{
+				note1: {
 					CanRead: true,
 					CanEdit: true,
 				},
-				2: {
+				note2: {
 					CanRead: true,
 					CanEdit: true,
 				},
-				3: {
+				note3: {
 					CanRead: true,
 					CanEdit: true,
 				},
@@ -173,7 +180,7 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 				access: model.SpaceMember{
 					RoleCode: model.EditorRoleCode,
 				},
-				noteIDs: []int{1, 2, 3},
+				noteIDs: noteIDs,
 			},
 			setupMocks: func(ctrl *gomock.Controller) *mocks.Mockstorage {
 				storage := mocks.NewMockstorage(ctrl)
@@ -181,15 +188,15 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 				storage.EXPECT().GetNotesVisibility(gomock.Any(), gomock.Any()).Return(
 					[]model.NoteVisibility{
 						{
-							ID:         1,
+							ID:         note1,
 							Visibility: model.VisibilityTypePrivateToAuthor,
 						},
 						{
-							ID:         2,
+							ID:         note2,
 							Visibility: model.VisibilityTypePrivateToAuthor,
 						},
 						{
-							ID:         3,
+							ID:         note3,
 							Visibility: model.VisibilityTypePrivateToAuthor,
 						},
 					}, nil,
@@ -197,7 +204,7 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 
 				return storage
 			},
-			want:    map[int]model.NoteAccessInfo{},
+			want:    map[uuid.UUID]model.NoteAccessInfo{},
 			wantErr: require.NoError,
 		},
 	}
@@ -224,40 +231,44 @@ func TestNotePermissionResolver_ResolveNotePermissions(t *testing.T) {
 func TestGrantSameAccessToAllNotes(t *testing.T) {
 	t.Parallel()
 
+	note1 := uuid.New()
+	note2 := uuid.New()
+
+	noteIDs := []uuid.UUID{note1, note2}
+
 	tests := []struct {
 		name    string
-		noteIDs []int
+		noteIDs []uuid.UUID
 		canEdit bool
 		canRead bool
-		want    map[int]model.NoteAccessInfo
+		want    map[uuid.UUID]model.NoteAccessInfo
 	}{
 		{
 			name:    "full access",
-			noteIDs: []int{1, 2, 3},
+			noteIDs: noteIDs,
 			canEdit: true,
 			canRead: true,
-			want: map[int]model.NoteAccessInfo{
-				1: {CanRead: true, CanEdit: true},
-				2: {CanRead: true, CanEdit: true},
-				3: {CanRead: true, CanEdit: true},
+			want: map[uuid.UUID]model.NoteAccessInfo{
+				note1: {CanRead: true, CanEdit: true},
+				note2: {CanRead: true, CanEdit: true},
 			},
 		},
 		{
 			name:    "read only",
-			noteIDs: []int{10, 20},
+			noteIDs: noteIDs,
 			canEdit: false,
 			canRead: true,
-			want: map[int]model.NoteAccessInfo{
-				10: {CanRead: true, CanEdit: false},
-				20: {CanRead: true, CanEdit: false},
+			want: map[uuid.UUID]model.NoteAccessInfo{
+				note1: {CanRead: true, CanEdit: false},
+				note2: {CanRead: true, CanEdit: false},
 			},
 		},
 		{
 			name:    "empty ids",
-			noteIDs: []int{},
+			noteIDs: []uuid.UUID{},
 			canEdit: true,
 			canRead: true,
-			want:    map[int]model.NoteAccessInfo{},
+			want:    map[uuid.UUID]model.NoteAccessInfo{},
 		},
 	}
 
@@ -277,6 +288,9 @@ func TestGrantSameAccessToAllNotes(t *testing.T) {
 func TestDecideNoteAccess(t *testing.T) {
 	t.Parallel()
 
+	userID := uuid.New()
+	noteID := uuid.New()
+
 	tests := []struct {
 		name       string
 		member     model.SpaceMember
@@ -286,12 +300,12 @@ func TestDecideNoteAccess(t *testing.T) {
 		{
 			name: "positive case: role OWNER, visibility SPACE",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.OwnerRoleCode,
 			},
 			visibility: model.NoteVisibility{
-				ID:         1,
+				ID:         noteID,
 				Visibility: model.VisibilityTypeSpace,
 			},
 			want: model.NoteAccessInfo{
@@ -302,12 +316,12 @@ func TestDecideNoteAccess(t *testing.T) {
 		{
 			name: "positive case: role ADMIN, visibility SPACE",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.AdminRoleCode,
 			},
 			visibility: model.NoteVisibility{
-				ID:         1,
+				ID:         noteID,
 				Visibility: model.VisibilityTypeSpace,
 			},
 			want: model.NoteAccessInfo{
@@ -318,12 +332,12 @@ func TestDecideNoteAccess(t *testing.T) {
 		{
 			name: "positive case: role EDITOR, visibility SPACE",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.EditorRoleCode,
 			},
 			visibility: model.NoteVisibility{
-				ID:         1,
+				ID:         noteID,
 				Visibility: model.VisibilityTypeSpace,
 			},
 			want: model.NoteAccessInfo{
@@ -334,12 +348,12 @@ func TestDecideNoteAccess(t *testing.T) {
 		{
 			name: "positive case: role VIEWER, visibility SPACE",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.ViewerRoleCode,
 			},
 			visibility: model.NoteVisibility{
-				ID:         1,
+				ID:         noteID,
 				Visibility: model.VisibilityTypeSpace,
 			},
 			want: model.NoteAccessInfo{
@@ -350,12 +364,12 @@ func TestDecideNoteAccess(t *testing.T) {
 		{
 			name: "positive case: role EDITOR, visibility CUSTOM: denyAll",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.EditorRoleCode,
 			},
 			visibility: model.NoteVisibility{
-				ID:         1,
+				ID:         noteID,
 				Visibility: model.VisibilityTypeCustom,
 			},
 			want: model.NoteAccessInfo{
@@ -379,6 +393,8 @@ func TestDecideNoteAccess(t *testing.T) {
 func TestAccessForSpaceVisibility(t *testing.T) {
 	t.Parallel()
 
+	userID := uuid.New()
+
 	tests := []struct {
 		name   string
 		member model.SpaceMember
@@ -387,7 +403,7 @@ func TestAccessForSpaceVisibility(t *testing.T) {
 		{
 			name: "positive case: OWNER",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.OwnerRoleCode,
 			},
@@ -399,7 +415,7 @@ func TestAccessForSpaceVisibility(t *testing.T) {
 		{
 			name: "positive case: ADMIN",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.AdminRoleCode,
 			},
@@ -411,7 +427,7 @@ func TestAccessForSpaceVisibility(t *testing.T) {
 		{
 			name: "positive case: EDITOR",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.EditorRoleCode,
 			},
@@ -423,7 +439,7 @@ func TestAccessForSpaceVisibility(t *testing.T) {
 		{
 			name: "positive case: VIEWER",
 			member: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.ViewerRoleCode,
 			},

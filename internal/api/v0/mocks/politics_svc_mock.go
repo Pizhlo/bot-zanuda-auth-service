@@ -10,6 +10,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 )
 
 // MockPoliticsService is a mock of PoliticsService interface.
@@ -36,10 +37,10 @@ func (m *MockPoliticsService) EXPECT() *MockPoliticsServiceMockRecorder {
 }
 
 // FilterNotes mocks base method.
-func (m *MockPoliticsService) FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[int]model.NoteAccessInfo, error) {
+func (m *MockPoliticsService) FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FilterNotes", ctx, req)
-	ret0, _ := ret[0].(map[int]model.NoteAccessInfo)
+	ret0, _ := ret[0].(map[uuid.UUID]model.NoteAccessInfo)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

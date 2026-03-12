@@ -4,6 +4,8 @@ import (
 	"auth-service/internal/model"
 	"context"
 	"errors"
+
+	"github.com/google/uuid"
 )
 
 // SpaceAccessChecker - сервис для определения доступа к пространству.
@@ -13,7 +15,7 @@ type SpaceAccessChecker struct {
 
 //go:generate mockgen -source=service.go -destination=mocks/storage_mock.go -package=mocks
 type spacesRepo interface {
-	GetSpaceMember(ctx context.Context, userID, spaceID int) (model.SpaceMember, error)
+	GetSpaceMember(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error)
 }
 
 type option func(*SpaceAccessChecker)

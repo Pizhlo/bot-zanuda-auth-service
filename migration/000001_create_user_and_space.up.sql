@@ -1,5 +1,7 @@
 -- https://www.perplexity.ai/search/ia-pytaius-sproektirovat-siste-AJFn5.BSSPi.XHuALnU5KQ
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 ALTER TABLE public.schema_migrations 
   ADD COLUMN IF NOT EXISTS created TIMESTAMP NOT NULL DEFAULT now();
 
@@ -7,7 +9,7 @@ CREATE SCHEMA  IF NOT EXISTS users;
 
 -- Пользователь
 CREATE TABLE IF NOT EXISTS users.telegram (
-    id              BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tg_id           BIGINT UNIQUE NOT NULL,
 
     global_invite_policy VARCHAR(32) NOT NULL DEFAULT 'ALLOW_ALL',
@@ -44,9 +46,9 @@ END $$;
 
 -- Пространство
 CREATE TABLE IF NOT EXISTS spaces.spaces (
-    id                  BIGSERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type                space_type NOT NULL DEFAULT 'PERSONAL',
-    owner_id            BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    owner_id            uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
     default_participant_role VARCHAR(64) NOT NULL DEFAULT 'EDITOR',
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -275,10 +277,10 @@ END $$;
 
 -- При удалении роли переводим участников в роль VIEWER (триггер ниже)
 CREATE TABLE IF NOT EXISTS spaces.space_member (
-    space_id    BIGINT NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    user_id     BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    space_id    uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
     role_id     BIGINT NOT NULL REFERENCES spaces.space_role(id) ON DELETE NO ACTION,
-    invited_by  BIGINT REFERENCES users.telegram(id) ON DELETE SET NULL,
+    invited_by  uuid REFERENCES users.telegram(id) ON DELETE SET NULL,
     status      member_status NOT NULL DEFAULT 'INVITED',
 
     can_invite  BOOLEAN NOT NULL DEFAULT true,   -- NULL = по роли, TRUE = разрешаем даже если роль не может

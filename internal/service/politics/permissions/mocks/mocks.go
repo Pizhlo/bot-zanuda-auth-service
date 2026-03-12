@@ -10,6 +10,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 )
 
 // Mockstorage is a mock of storage interface.
@@ -36,7 +37,7 @@ func (m *Mockstorage) EXPECT() *MockstorageMockRecorder {
 }
 
 // GetNotesVisibility mocks base method.
-func (m *Mockstorage) GetNotesVisibility(ctx context.Context, ids []int) ([]model.NoteVisibility, error) {
+func (m *Mockstorage) GetNotesVisibility(ctx context.Context, ids []uuid.UUID) ([]model.NoteVisibility, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetNotesVisibility", ctx, ids)
 	ret0, _ := ret[0].([]model.NoteVisibility)

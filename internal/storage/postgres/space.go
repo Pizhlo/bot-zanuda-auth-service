@@ -7,10 +7,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/google/uuid"
 )
 
 // GetSpaceMember возвращает информацию об участнике пространства. Если не найдено пространство или участник - возвращает storage.ErrNotFound.
-func (db *Repo) GetSpaceMember(ctx context.Context, userID, spaceID int) (model.SpaceMember, error) {
+func (db *Repo) GetSpaceMember(ctx context.Context, userID uuid.UUID, spaceID uuid.UUID) (model.SpaceMember, error) {
 	ctxTimeout, cancel := context.WithTimeout(ctx, db.readTimeout)
 	defer cancel()
 
@@ -23,7 +25,7 @@ WHERE sm.space_id = $1 AND sm.user_id = $2;`
 
 	var member model.SpaceMember
 
-	var invitedBy sql.NullInt64
+	var invitedBy *uuid.UUID
 
 	err := row.Scan(&member.RoleCode, &invitedBy, &member.Status, &member.CanInvite, &member.CreatedAt)
 	if err != nil {
@@ -34,11 +36,11 @@ WHERE sm.space_id = $1 AND sm.user_id = $2;`
 		return model.SpaceMember{}, fmt.Errorf("scan error: %w", err)
 	}
 
-	member.UserID = userID
-
-	if invitedBy.Valid {
-		member.InvitedBy = int(invitedBy.Int64)
+	if invitedBy != nil {
+		member.InvitedBy = *invitedBy
 	}
+
+	member.UserID = userID
 
 	return member, nil
 }
