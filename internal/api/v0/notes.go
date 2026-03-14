@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
@@ -50,18 +51,24 @@ func (s *Handler) FilterNotes(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty note id list"})
 	}
 
-	if req.SpaceID < 1 {
+	if req.SpaceID == uuid.Nil {
 		logrus.Debug("invalid space id")
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty space id"})
 	}
 
 	userID, ok := userIDFromContext(c.Request().Context())
-	if !ok {
+	if !ok || userID == "" {
 		logrus.Debug("no user in context")
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no user in context"})
 	}
 
-	req.UserID = userID
+	userIDUUID, err := uuid.Parse(userID)
+	if err != nil {
+		logrus.WithError(err).Error("error parsing user id")
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+	}
+
+	req.UserID = userIDUUID
 
 	notes, err := s.PoliticsService.FilterNotes(c.Request().Context(), req)
 	if err != nil {
@@ -81,9 +88,9 @@ func (s *Handler) FilterNotes(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-func userIDFromContext(ctx context.Context) (int, bool) {
+func userIDFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(withUserIDCtxKey{})
-	id, ok := v.(int)
+	id, ok := v.(string)
 
 	return id, ok
 }

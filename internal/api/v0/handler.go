@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
@@ -28,7 +29,7 @@ type PoliticsService interface {
 	// FilterNotes фильтрует входящие заметки согласно политикам.
 	// Возвращает только заметки, доступные пользователю, с флагом canEdit -
 	// может ли пользователь редактировать заметку.
-	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[int]model.NoteAccessInfo, error)
+	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error)
 }
 
 type handlerOption func(*Handler)

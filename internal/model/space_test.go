@@ -3,6 +3,7 @@ package model
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,7 +18,7 @@ func TestSpaceMember_CanEditNote(t *testing.T) {
 		{
 			name: "role: OWNER",
 			member: SpaceMember{
-				UserID:   1,
+				UserID:   uuid.New(),
 				RoleCode: OwnerRoleCode,
 			},
 			want: require.True,
@@ -25,7 +26,7 @@ func TestSpaceMember_CanEditNote(t *testing.T) {
 		{
 			name: "role: ADMIN",
 			member: SpaceMember{
-				UserID:   1,
+				UserID:   uuid.New(),
 				RoleCode: AdminRoleCode,
 			},
 			want: require.True,
@@ -33,7 +34,7 @@ func TestSpaceMember_CanEditNote(t *testing.T) {
 		{
 			name: "role: EDITOR",
 			member: SpaceMember{
-				UserID:   1,
+				UserID:   uuid.New(),
 				RoleCode: EditorRoleCode,
 			},
 			want: require.True,
@@ -41,7 +42,7 @@ func TestSpaceMember_CanEditNote(t *testing.T) {
 		{
 			name: "role: VIEWER",
 			member: SpaceMember{
-				UserID:   1,
+				UserID:   uuid.New(),
 				RoleCode: ViewerRoleCode,
 			},
 			want: require.False,

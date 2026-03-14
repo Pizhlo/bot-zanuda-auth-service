@@ -70,7 +70,7 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		userID := parseUserID(userIDAny)
-		if userID == -1 {
+		if userID == "" {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token: invalid type of field 'user_id'"})
 		}
 
@@ -86,17 +86,15 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 
 type withUserIDCtxKey struct{}
 
-func withUserID(ctx context.Context, value int) context.Context {
+func withUserID(ctx context.Context, value string) context.Context {
 	return context.WithValue(ctx, withUserIDCtxKey{}, value)
 }
 
-func parseUserID(value any) int {
+func parseUserID(value any) string {
 	switch t := value.(type) {
-	case int:
-		return int(t)
-	case float64:
-		return int(t)
+	case string:
+		return t
 	default:
-		return -1
+		return ""
 	}
 }

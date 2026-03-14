@@ -4,17 +4,17 @@ CREATE SCHEMA IF NOT EXISTS reminders;
 -- основная таблица - у сервиса напоминаний.
 -- здесь только информация для сервиса авторизации.
 CREATE TABLE IF NOT EXISTS reminders.reminders (
-    id          BIGSERIAL PRIMARY KEY,
-    space_id    BIGINT NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    author_id   BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    space_id    uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
+    author_id   uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Кому летит напоминание и какие у него перс. права
 CREATE TABLE IF NOT EXISTS reminders.reminder_recipient (
-    reminder_id BIGINT NOT NULL REFERENCES reminders.reminders(id) ON DELETE CASCADE,
-    user_id     BIGINT NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    reminder_id uuid NOT NULL REFERENCES reminders.reminders(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
 
     can_stop    BOOLEAN,        -- NULL = по роли, TRUE/FALSE = override
 

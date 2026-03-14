@@ -4,11 +4,11 @@ import (
 	"auth-service/internal/model"
 	"auth-service/internal/service/politics/access/mocks"
 	"auth-service/internal/storage"
-	"context"
 	"errors"
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -17,18 +17,21 @@ import (
 func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 	t.Parallel()
 
+	spaceID := uuid.New()
+	userID := uuid.New()
+
 	tests := []struct {
 		name         string
-		userID       int
-		spaceID      int
+		userID       uuid.UUID
+		spaceID      uuid.UUID
 		prepareMocks func(ctrl *gomock.Controller) *mocks.MockspacesRepo
 		want         model.SpaceMember
 		wantErr      require.ErrorAssertionFunc
 	}{
 		{
 			name:    "user is member",
-			userID:  1,
-			spaceID: 10,
+			userID:  userID,
+			spaceID: spaceID,
 			prepareMocks: func(ctrl *gomock.Controller) *mocks.MockspacesRepo {
 				t.Helper()
 
@@ -36,7 +39,7 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 				mockRepo.EXPECT().
 					GetSpaceMember(gomock.Any(), gomock.Any(), gomock.Any()).
 					Return(model.SpaceMember{
-						UserID:   1,
+						UserID:   userID,
 						RoleCode: model.EditorRoleCode,
 						Status:   model.ActiveMemberStatus,
 					}, nil)
@@ -44,7 +47,7 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 				return mockRepo
 			},
 			want: model.SpaceMember{
-				UserID:   1,
+				UserID:   userID,
 				IsMember: true,
 				RoleCode: model.EditorRoleCode,
 				Status:   model.ActiveMemberStatus,
@@ -53,8 +56,8 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 		},
 		{
 			name:    "user not found in space",
-			userID:  2,
-			spaceID: 10,
+			userID:  userID,
+			spaceID: spaceID,
 			prepareMocks: func(ctrl *gomock.Controller) *mocks.MockspacesRepo {
 				t.Helper()
 
@@ -72,8 +75,8 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 		},
 		{
 			name:    "repo returns error",
-			userID:  1,
-			spaceID: 10,
+			userID:  userID,
+			spaceID: spaceID,
 			prepareMocks: func(ctrl *gomock.Controller) *mocks.MockspacesRepo {
 				t.Helper()
 
@@ -102,7 +105,7 @@ func TestSpaceAccessChecker_CheckSpaceAccess(t *testing.T) {
 			mockRepo := tt.prepareMocks(ctrl)
 			svc := &SpaceAccessChecker{spacesRepo: mockRepo}
 
-			got, err := svc.CheckSpaceAccess(context.Background(), tt.userID, tt.spaceID)
+			got, err := svc.CheckSpaceAccess(t.Context(), tt.userID, tt.spaceID)
 			tt.wantErr(t, err)
 
 			assert.Equal(t, tt.want, got)

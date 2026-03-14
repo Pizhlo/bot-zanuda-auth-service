@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
 
 // CheckSpaceAccess проверяет, является ли пользователь участником пространства.
-func (s *SpaceAccessChecker) CheckSpaceAccess(ctx context.Context, userID, spaceID int) (model.SpaceMember, error) {
+func (s *SpaceAccessChecker) CheckSpaceAccess(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error) {
 	logrus.WithFields(logrus.Fields{
 		"user_id":  userID,
 		"space_id": spaceID,

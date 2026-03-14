@@ -10,6 +10,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	uuid "github.com/google/uuid"
 )
 
 // Mockstorage is a mock of storage interface.
@@ -36,10 +37,10 @@ func (m *Mockstorage) EXPECT() *MockstorageMockRecorder {
 }
 
 // FilterNoteIDs mocks base method.
-func (m *Mockstorage) FilterNoteIDs(ctx context.Context, spaceID int, ids []int) ([]int, error) {
+func (m *Mockstorage) FilterNoteIDs(ctx context.Context, spaceID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FilterNoteIDs", ctx, spaceID, ids)
-	ret0, _ := ret[0].([]int)
+	ret0, _ := ret[0].([]uuid.UUID)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -74,7 +75,7 @@ func (m *MockspaceAccessChecker) EXPECT() *MockspaceAccessCheckerMockRecorder {
 }
 
 // CheckSpaceAccess mocks base method.
-func (m *MockspaceAccessChecker) CheckSpaceAccess(ctx context.Context, userID, spaceID int) (model.SpaceMember, error) {
+func (m *MockspaceAccessChecker) CheckSpaceAccess(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CheckSpaceAccess", ctx, userID, spaceID)
 	ret0, _ := ret[0].(model.SpaceMember)
@@ -112,10 +113,10 @@ func (m *MocknotePermissionResolver) EXPECT() *MocknotePermissionResolverMockRec
 }
 
 // ResolveNotePermissions mocks base method.
-func (m *MocknotePermissionResolver) ResolveNotePermissions(ctx context.Context, access model.SpaceMember, noteIDs []int) (map[int]model.NoteAccessInfo, error) {
+func (m *MocknotePermissionResolver) ResolveNotePermissions(ctx context.Context, access model.SpaceMember, noteIDs []uuid.UUID) (map[uuid.UUID]model.NoteAccessInfo, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ResolveNotePermissions", ctx, access, noteIDs)
-	ret0, _ := ret[0].(map[int]model.NoteAccessInfo)
+	ret0, _ := ret[0].(map[uuid.UUID]model.NoteAccessInfo)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

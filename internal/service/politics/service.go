@@ -4,6 +4,8 @@ import (
 	"auth-service/internal/model"
 	"context"
 	"errors"
+
+	"github.com/google/uuid"
 )
 
 // Service - сервис политик. К нему обращаются, когда нужно выяснить, может ли пользователь
@@ -20,15 +22,15 @@ type Service struct {
 type storage interface {
 	// FilterNoteIDs фильтрует входящие айди, чтобы они все принадлежали пространствам.
 	// Пример: список [1, 2, 3, 4, 5, 6], в пространстве только: [1, 2, 3] -> вернется только [1, 2, 3].
-	FilterNoteIDs(ctx context.Context, spaceID int, ids []int) ([]int, error)
+	FilterNoteIDs(ctx context.Context, spaceID uuid.UUID, ids []uuid.UUID) ([]uuid.UUID, error)
 }
 
 type spaceAccessChecker interface {
-	CheckSpaceAccess(ctx context.Context, userID, spaceID int) (model.SpaceMember, error)
+	CheckSpaceAccess(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error)
 }
 
 type notePermissionResolver interface {
-	ResolveNotePermissions(ctx context.Context, access model.SpaceMember, noteIDs []int) (map[int]model.NoteAccessInfo, error)
+	ResolveNotePermissions(ctx context.Context, access model.SpaceMember, noteIDs []uuid.UUID) (map[uuid.UUID]model.NoteAccessInfo, error)
 }
 
 type option func(*Service)

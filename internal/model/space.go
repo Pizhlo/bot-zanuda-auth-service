@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // SpaceType определяет тип пространства: личное или совместное.
 type SpaceType string
@@ -16,9 +20,9 @@ const (
 // В совместное можно приглашать других пользователей, личное доступно только пользователю-создателю.
 // Используется для хранения записей пользователей: заметок, напоминаний.
 type Space struct {
-	ID                     int
+	ID                     uuid.UUID
 	Type                   SpaceType
-	OwnerID                int
+	OwnerID                uuid.UUID
 	DefaultParticipantRole string
 	CreatedAt              time.Time
 }
@@ -52,10 +56,10 @@ const (
 // SpaceMember - участник пространства.
 // Описывает информацию об участнике пространства: статус, может ли приглашать других, роль и т.д.
 type SpaceMember struct {
-	UserID    int
+	UserID    uuid.UUID
 	IsMember  bool
 	RoleCode  RoleCode // OWNER / ADMIN / EDITOR / VIEWER / ...
-	InvitedBy int
+	InvitedBy uuid.UUID
 	Status    MemberStatus
 	CanInvite bool
 	CreatedAt time.Time
