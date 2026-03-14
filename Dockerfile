@@ -41,6 +41,12 @@ RUN adduser -D -g '' appuser
 # Копируем собранное приложение
 COPY --from=builder /build/main /app/main
 
+# Копируем миграции
+COPY --from=builder /build/migration /app/migration
+
+# Копируем конфигурацию casbin
+COPY --from=builder /build/casbin_model.conf /app/casbin_model.conf
+
 # Переключаемся на непривилегированного пользователя
 USER appuser
 
