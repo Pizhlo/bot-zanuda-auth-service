@@ -8,11 +8,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	sqldblogger "github.com/simukti/sqldb-logger"
 	"github.com/simukti/sqldb-logger/logadapter/logrusadapter"
 	"github.com/sirupsen/logrus"
 
-	_ "github.com/lib/pq" // postgres driver
+	_ "github.com/golang-migrate/migrate/v4/database/postgres" // postgres database driver for migrations
+	_ "github.com/golang-migrate/migrate/v4/source/file"       // for loading migrations from file
+	_ "github.com/lib/pq"                                      // postgres driver
 )
 
 // Repo сохраняет сообщения и результаты их обработки в базу данных.
@@ -117,6 +120,57 @@ func (db *Repo) Run(ctx context.Context) error {
 	logrus.WithFields(logrus.Fields{
 		"addr": db.addr,
 	}).Info("successfully connected postgres")
+
+	if err := db.loadMigrations(); err != nil {
+		return fmt.Errorf("error loading migrations: %w", err)
+	}
+
+	return nil
+}
+
+func (db *Repo) loadMigrations() error {
+	m, err := migrate.New(
+		"file://migration",
+		db.addr)
+	if err != nil {
+		return fmt.Errorf("error creating migrate: %w", err)
+	}
+
+	defer func() {
+		if _, err := m.Close(); err != nil {
+			logrus.WithError(err).Error("error closing migrate instance")
+		}
+	}()
+
+	if err := m.Up(); err != nil {
+		if errors.Is(err, migrate.ErrNoChange) {
+			version, dirty, err := m.Version()
+			if err != nil {
+				return fmt.Errorf("error getting version: %w", err)
+			}
+
+			logrus.WithFields(logrus.Fields{
+				"addr":    db.addr,
+				"version": version,
+				"dirty":   dirty,
+			}).Info("migrations loaded: no change")
+
+			return nil
+		}
+
+		return fmt.Errorf("error migrating up: %w", err)
+	}
+
+	version, dirty, err := m.Version()
+	if err != nil {
+		return fmt.Errorf("error getting version: %w", err)
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"addr":    db.addr,
+		"version": version,
+		"dirty":   dirty,
+	}).Info("migrations loaded")
 
 	return nil
 }

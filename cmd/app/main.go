@@ -85,7 +85,7 @@ func main() {
 	if err := repo.Run(ctx); err != nil {
 		logrus.WithFields(logrus.Fields{
 			"db_name": config.Postgres.DBName,
-		}).Fatal("unable to connect postgres")
+		}).WithError(err).Fatal("unable to connect postgres")
 	}
 
 	defer butler.stop(ctx, repo)

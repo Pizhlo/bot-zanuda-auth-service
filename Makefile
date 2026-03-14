@@ -250,43 +250,55 @@ migrate-down:
 # Тестовые данные: список имён (без .up.sql/.down.sql), порядок = порядок накатывания
 TESTDATA_ENTRIES := test_user test_space test_notes test_shared_space
 
+DB ?= local
+
 add-test-user:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.up.sql
+	@echo "> adding test_user..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.up.sql
 	@echo "> test_user applied"
 
 remove-test-user:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.down.sql
+	@echo "> removing test_user..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.down.sql
 	@echo "> test_user rolled back"
 
 add-test-space:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.up.sql
+	@echo "> adding test_space..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.up.sql
 	@echo "> test_space applied"
 
 remove-test-space:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.down.sql
+	@echo "> removing test_space..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.down.sql
 	@echo "> test_space rolled back"
 
 add-test-notes:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.up.sql
+	@echo "> adding test_notes..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.up.sql
 	@echo "> test_notes applied"
 
 remove-test-notes:
-	docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.down.sql
+	@echo "> removing test_notes..."
+	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.down.sql
 	@echo "> test_notes rolled back"
 
 # Накатить все тестовые данные из testdata (порядок задаётся TESTDATA_ENTRIES)
 testdata-up:
+	@echo "> applying testdata..."
+	@set -e;
 	@for name in $(TESTDATA_ENTRIES); do \
 		echo "> applying testdata/$$name.up.sql..."; \
-		docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.up.sql; \
+		docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.up.sql; \
 	done
 	@echo "> testdata applied"
 
 # Откатить все тестовые данные (обратный порядок)
 testdata-down:
+	@echo "> rolling back testdata..."
+	@set -e;
 	@for name in $$(echo $(TESTDATA_ENTRIES) | tr ' ' '\n' | tac); do \
 		echo "> rolling back testdata/$$name.down.sql..."; \
-		docker exec -i auth-service-postgres-local psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.down.sql; \
+		docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.down.sql; \
 	done
 	@echo "> testdata rolled back"
 
