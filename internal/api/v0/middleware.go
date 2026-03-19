@@ -25,8 +25,8 @@ type AuthService interface {
 
 type option func(*MiddlewareHandler)
 
-// WithAuthService устанавливает сервис авторизации.
-func WithAuthService(svc AuthService) option {
+// WithMiddlewareAuthService устанавливает сервис авторизации.
+func WithMiddlewareAuthService(svc AuthService) option {
 	return func(h *MiddlewareHandler) {
 		h.authService = svc
 	}

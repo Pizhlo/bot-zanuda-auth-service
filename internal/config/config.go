@@ -23,8 +23,10 @@ type Config struct {
 
 // Auth - данные для работы Auth-сервиса.
 type Auth struct {
-	SecretKey         string        `yaml:"secret_key" validate:"required"`          // секретный ключ для генерации токена.
-	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required"` // интервал для обновления апи-ключа в Vault.
+	SecretKey         string        `yaml:"secret_key" validate:"required"`           // секретный ключ для генерации токена.
+	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required"`  // интервал для обновления апи-ключа в Vault.
+	Issuer            string        `yaml:"issuer" validate:"required"`               // issuer для генерации токена.
+	TokenDuration     time.Duration `yaml:"token_duration" validate:"required,min=1"` // duration access токена.
 }
 
 // Server - конфигурация сервера.
@@ -38,10 +40,11 @@ type Server struct {
 type Vault struct {
 	Address         string `yaml:"address" validate:"required,url"`
 	Token           string `yaml:"token" validate:"required"`
-	InsecureSkipTLS bool   `yaml:"insecure_skip_tls"` // Пропускать проверку TLS сертификата (только для разработки)
-	CAPath          string `yaml:"ca_path"`           // Путь к CA сертификату (опционально)
-	ClientCertPath  string `yaml:"client_cert_path"`  // Путь к клиентскому сертификату (опционально)
-	ClientKeyPath   string `yaml:"client_key_path"`   // Путь к клиентскому ключу (опционально)
+	InsecureSkipTLS bool   `yaml:"insecure_skip_tls" validate:"omitempty"` // Пропускать проверку TLS сертификата (только для разработки)
+	CAPath          string `yaml:"ca_path" validate:"omitempty"`           // Путь к CA сертификату (опционально)
+	ClientCertPath  string `yaml:"client_cert_path" validate:"omitempty"`  // Путь к клиентскому сертификату (опционально)
+	ClientKeyPath   string `yaml:"client_key_path" validate:"omitempty"`   // Путь к клиентскому ключу (опционально)
+	SecretsPath     string `yaml:"secrets_path" validate:"required"`       // где хранится bot API key в Vault
 }
 
 // RedisType - тип подключения к Redis: single - один узел, cluster - кластер.

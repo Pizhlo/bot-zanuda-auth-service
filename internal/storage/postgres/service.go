@@ -1,4 +1,4 @@
-package politics
+package postgres
 
 import (
 	"context"
@@ -129,9 +129,11 @@ func (db *Repo) Run(ctx context.Context) error {
 }
 
 func (db *Repo) loadMigrations() error {
+	dsn := fmt.Sprintf("%s&search_path=public", db.addr)
+
 	m, err := migrate.New(
 		"file://migration",
-		db.addr)
+		dsn)
 	if err != nil {
 		return fmt.Errorf("error creating migrate: %w", err)
 	}

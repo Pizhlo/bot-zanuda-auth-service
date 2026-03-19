@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,6 +17,8 @@ type Handler struct {
 	gitCommit string
 
 	apiVersion string
+
+	auth authProcessorHandler
 
 	// services
 
@@ -30,6 +33,11 @@ type PoliticsService interface {
 	// Возвращает только заметки, доступные пользователю, с флагом canEdit -
 	// может ли пользователь редактировать заметку.
 	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error)
+}
+
+type authProcessorHandler interface {
+	// Login проверяет корректность полученных данных и отправляет в ответ JWT-токен.
+	Login(c echo.Context) error
 }
 
 type handlerOption func(*Handler)
@@ -62,8 +70,15 @@ func WithPoliticsService(svc PoliticsService) handlerOption {
 	}
 }
 
-// New создает новый хендлер. Автоматически устанавливает версию хендлера на Version0.
-func New(opts ...handlerOption) (*Handler, error) {
+// WithAuthHandler устанавливает хендлер авторизации.
+func WithAuthHandler(auth authProcessorHandler) handlerOption {
+	return func(h *Handler) {
+		h.auth = auth
+	}
+}
+
+// NewHandler создает новый хендлер. Автоматически устанавливает версию хендлера на Version0.
+func NewHandler(opts ...handlerOption) (*Handler, error) {
 	h := &Handler{}
 
 	for _, opt := range opts {
@@ -84,6 +99,10 @@ func New(opts ...handlerOption) (*Handler, error) {
 
 	if h.PoliticsService == nil {
 		return nil, errors.New("politics service is required")
+	}
+
+	if h.auth == nil {
+		return nil, errors.New("auth handler is required")
 	}
 
 	h.apiVersion = Version0
@@ -107,4 +126,9 @@ const (
 // Нужен для соответствия интерфейсу server.versionHandler.
 func (h *Handler) Version() string {
 	return h.apiVersion
+}
+
+// Login проверяет корректность полученных данных и отправляет в ответ JWT-токен.
+func (h *Handler) Login(c echo.Context) error {
+	return h.auth.Login(c)
 }

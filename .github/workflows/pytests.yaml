@@ -55,9 +55,6 @@ jobs:
           ${{ secrets.PYTESTS_CONFIG }}
           EOF
 
-      - name: Create certs for Vault
-        run: make certs
-
       - name: Run Postgres
         run: docker compose -f docker-compose.tests.yaml up -d postgres
 
@@ -84,8 +81,45 @@ jobs:
             exit 1
           fi
 
-      - name: Run Vault, Redis and Auth Service
-        run: docker compose -f docker-compose.tests.yaml up -d vault redis auth-service
+      - name: Run Redis, Vault and Auth Service
+        run: docker compose -f docker-compose.tests.yaml up -d redis vault auth-service
+
+      - name: Init Vault KV for auth service
+        env:
+          VAULT_DEV_ROOT_TOKEN: ${{ secrets.VAULT_DEV_ROOT_TOKEN }}
+          BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
+          VAULT_SECRETS_PATH: ${{ secrets.VAULT_SECRETS_PATH }} # secret/auth/service-clients
+        run: |
+          echo "Waiting for Vault container..."
+          vault_up=0
+          for i in $(seq 1 60); do
+            if docker compose -f docker-compose.tests.yaml ps vault | grep -q "Up"; then
+              echo "Vault container is Up"
+              vault_up=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$vault_up" -ne 1 ]; then
+            echo "❌ Vault container did not become ready in time"
+            docker compose -f docker-compose.tests.yaml ps vault
+            docker compose -f docker-compose.tests.yaml logs vault
+            exit 1
+          fi
+
+          echo "Vault logs (last 20 lines):"
+          docker compose -f docker-compose.tests.yaml logs --tail=20 vault || echo "no vault service named 'vault'"
+
+          echo "Init KV inside Vault container..."
+          docker compose -f docker-compose.tests.yaml exec -T vault \
+            /bin/sh -lc "
+              export VAULT_ADDR=http://127.0.0.1:8200
+              export VAULT_TOKEN='${VAULT_DEV_ROOT_TOKEN}'
+              vault status
+              vault kv put '${VAULT_SECRETS_PATH}/bot' api_key='${BOT_API_KEY}'
+              vault kv get '${VAULT_SECRETS_PATH}/bot'
+            "
 
       - name: Wait for Auth Service health
         run: |

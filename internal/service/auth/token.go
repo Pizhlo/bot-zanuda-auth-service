@@ -58,3 +58,19 @@ func (s *Service) GetPayload(token *jwt.Token) (jwt.MapClaims, bool) {
 
 	return payload, true
 }
+
+type tokenClaims struct {
+	Scope string `json:"scope"`
+	jwt.RegisteredClaims
+}
+
+func (s *Service) generateToken(claims tokenClaims) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := token.SignedString(s.secretKey)
+	if err != nil {
+		return "", err
+	}
+
+	return signed, nil
+}

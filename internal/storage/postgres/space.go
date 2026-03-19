@@ -1,4 +1,4 @@
-package politics
+package postgres
 
 import (
 	"auth-service/internal/model"

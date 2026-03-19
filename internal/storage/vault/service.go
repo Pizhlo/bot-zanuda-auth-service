@@ -20,6 +20,8 @@ type Client struct {
 	caPath          string
 	clientCertPath  string
 	clientKeyPath   string
+
+	secretsPath string // где хранится bot API key в Vault
 }
 
 // ClientOption - опция для настройки клиента Vault.
@@ -55,6 +57,13 @@ func WithTLSConfig(caPath, clientCertPath, clientKeyPath string) ClientOption {
 	}
 }
 
+// WithSecretsPath устанавливает путь к bot API key в Vault.
+func WithSecretsPath(secretsPath string) ClientOption {
+	return func(vc *Client) {
+		vc.secretsPath = secretsPath
+	}
+}
+
 // NewClient создает новый клиент для работы с Vault.
 func NewClient(opts ...ClientOption) (*Client, error) {
 	vaultClient := &Client{}
@@ -75,6 +84,10 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 		if vaultClient.caPath == "" {
 			return nil, errors.New("CA certificate is required")
 		}
+	}
+
+	if vaultClient.secretsPath == "" {
+		return nil, errors.New("secrets path is required")
 	}
 
 	// Проверяем, что клиентский сертификат и ключ указаны вместе (либо ничего из этого)

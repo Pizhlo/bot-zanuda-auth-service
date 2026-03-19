@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -78,10 +77,7 @@ func main() {
 
 	defer butler.stop(ctx, vaultClient)
 
-	authSvc := initAuthService([]byte(config.Auth.SecretKey), vaultClient, config.Auth.UpdateKeyInterval)
-
 	repo := initPostgresStorage(ctx, config.Postgres)
-
 	if err := repo.Run(ctx); err != nil {
 		logrus.WithFields(logrus.Fields{
 			"db_name": config.Postgres.DBName,
@@ -90,12 +86,16 @@ func main() {
 
 	defer butler.stop(ctx, repo)
 
+	authSvc := initAuthService(vaultClient, config.Auth, repo)
+
 	spaceAccessChecker := initSpaceAccessChecker(repo)
 	notePermissionResolver := initNotePermissionResolver(repo)
 
 	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
 
-	handlerV0 := initHandlerV0(butler.BuildInfo, politicsSvc)
+	authHandler := initAuthHandler(authSvc)
+
+	handlerV0 := initHandlerV0(butler.BuildInfo, politicsSvc, authHandler)
 	middlewareHandler := initMiddlewareHandler(authSvc)
 	server := initServer(handlerV0, middlewareHandler, config.Server)
 
@@ -163,21 +163,36 @@ func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissio
 	)
 }
 
-func initAuthService(secretKey []byte, vaultClient *vault.Client, updateKeyInterval time.Duration) *auth.Service {
+func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.Repo) *auth.Service {
 	logrus.WithFields(logrus.Fields{
-		"update_key_interval": updateKeyInterval,
+		"update_key_interval": cfg.UpdateKeyInterval,
+		"issuer":              cfg.Issuer,
+		"token_duration":      cfg.TokenDuration,
 	}).Info("initializing auth service")
 
 	return start(
 		auth.New(
-			auth.WithSecretKey(secretKey),
-			auth.WithUpdateKeyInterval(updateKeyInterval),
+			auth.WithSecretKey([]byte(cfg.SecretKey)),
+			auth.WithUpdateKeyInterval(cfg.UpdateKeyInterval),
+			auth.WithIssuer(cfg.Issuer),
+			auth.WithTokenDuration(cfg.TokenDuration),
 			auth.WithVaultClient(vaultClient),
+			auth.WithStorage(storage),
 		),
 	)
 }
 
-func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService) *handlerV0.Handler {
+func initAuthHandler(authSrv *auth.Service) *handlerV0.AuthHandler {
+	logrus.WithFields(logrus.Fields{}).Info("initializing auth handler v0")
+
+	return start(
+		handlerV0.NewAuthHandler(
+			handlerV0.WithAuthService(authSrv),
+		),
+	)
+}
+
+func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService, auth *handlerV0.AuthHandler) *handlerV0.Handler {
 	logrus.WithFields(logrus.Fields{
 		"version":   buildInfo.Version,
 		"buildDate": buildInfo.BuildDate,
@@ -185,11 +200,12 @@ func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService) *ha
 	}).Info("initializing handler v0")
 
 	return start(
-		handlerV0.New(
+		handlerV0.NewHandler(
 			handlerV0.WithVersion(buildInfo.Version),
 			handlerV0.WithBuildDate(buildInfo.BuildDate),
 			handlerV0.WithGitCommit(buildInfo.GitCommit),
 			handlerV0.WithPoliticsService(politics),
+			handlerV0.WithAuthHandler(auth),
 		),
 	)
 }
@@ -199,7 +215,7 @@ func initMiddlewareHandler(authSvc handlerV0.AuthService) *handlerV0.MiddlewareH
 
 	return start(
 		handlerV0.NewMiddlewareHandler(
-			handlerV0.WithAuthService(authSvc),
+			handlerV0.WithMiddlewareAuthService(authSvc),
 		),
 	)
 }
@@ -247,6 +263,7 @@ func initVaultClient(cfg config.Vault) *vault.Client {
 	opts := []vault.ClientOption{
 		vault.WithAddress(cfg.Address),
 		vault.WithToken(cfg.Token),
+		vault.WithSecretsPath(cfg.SecretsPath),
 	}
 
 	if cfg.InsecureSkipTLS {

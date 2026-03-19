@@ -62,6 +62,20 @@ func (mr *MockhandlerMockRecorder) Health(c interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Health", reflect.TypeOf((*Mockhandler)(nil).Health), c)
 }
 
+// Login mocks base method.
+func (m *Mockhandler) Login(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Login", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Login indicates an expected call of Login.
+func (mr *MockhandlerMockRecorder) Login(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*Mockhandler)(nil).Login), c)
+}
+
 // Version mocks base method.
 func (m *Mockhandler) Version() string {
 	m.ctrl.T.Helper()
@@ -111,6 +125,43 @@ func (m *MockversionHandler) Version() string {
 func (mr *MockversionHandlerMockRecorder) Version() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Version", reflect.TypeOf((*MockversionHandler)(nil).Version))
+}
+
+// MockauthHandler is a mock of authHandler interface.
+type MockauthHandler struct {
+	ctrl     *gomock.Controller
+	recorder *MockauthHandlerMockRecorder
+}
+
+// MockauthHandlerMockRecorder is the mock recorder for MockauthHandler.
+type MockauthHandlerMockRecorder struct {
+	mock *MockauthHandler
+}
+
+// NewMockauthHandler creates a new mock instance.
+func NewMockauthHandler(ctrl *gomock.Controller) *MockauthHandler {
+	mock := &MockauthHandler{ctrl: ctrl}
+	mock.recorder = &MockauthHandlerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockauthHandler) EXPECT() *MockauthHandlerMockRecorder {
+	return m.recorder
+}
+
+// Login mocks base method.
+func (m *MockauthHandler) Login(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Login", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Login indicates an expected call of Login.
+func (mr *MockauthHandlerMockRecorder) Login(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockauthHandler)(nil).Login), c)
 }
 
 // MockhealthHandler is a mock of healthHandler interface.

@@ -28,11 +28,13 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithInsecureSkipTLS(true),
+				WithSecretsPath("secret/data/"),
 			},
 			want: &Client{
 				address:         "https://localhost:8200",
 				token:           "vault-token",
 				insecureSkipTLS: true,
+				secretsPath:     "secret/data/",
 			},
 			wantErr: require.NoError,
 		},
@@ -42,6 +44,7 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithTLSConfig("/path/to/ca.pem", "", ""),
+				WithSecretsPath("secret/data/"),
 			},
 			want: &Client{
 				address:        "https://localhost:8200",
@@ -49,6 +52,7 @@ func TestNewClient(t *testing.T) {
 				caPath:         "/path/to/ca.pem",
 				clientCertPath: "",
 				clientKeyPath:  "",
+				secretsPath:    "secret/data/",
 			},
 			wantErr: require.NoError,
 		},
@@ -58,6 +62,7 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithTLSConfig("/path/to/ca.pem", "/path/to/cert.pem", "/path/to/key.pem"),
+				WithSecretsPath("secret/data/"),
 			},
 			want: &Client{
 				address:        "https://localhost:8200",
@@ -65,6 +70,7 @@ func TestNewClient(t *testing.T) {
 				caPath:         "/path/to/ca.pem",
 				clientCertPath: "/path/to/cert.pem",
 				clientKeyPath:  "/path/to/key.pem",
+				secretsPath:    "secret/data/",
 			},
 			wantErr: require.NoError,
 		},
@@ -75,6 +81,7 @@ func TestNewClient(t *testing.T) {
 				WithToken("vault-token"),
 				WithInsecureSkipTLS(true),
 				WithTLSConfig("/path/to/ca.pem", "/path/to/cert.pem", "/path/to/key.pem"),
+				WithSecretsPath("secret/data/"),
 			},
 			want: &Client{
 				address:         "https://localhost:8200",
@@ -83,6 +90,7 @@ func TestNewClient(t *testing.T) {
 				caPath:          "/path/to/ca.pem",
 				clientCertPath:  "/path/to/cert.pem",
 				clientKeyPath:   "/path/to/key.pem",
+				secretsPath:     "secret/data/",
 			},
 			wantErr: require.NoError,
 		},
@@ -107,6 +115,7 @@ func TestNewClient(t *testing.T) {
 			options: []ClientOption{
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
+				WithSecretsPath("secret/data/"),
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
@@ -119,6 +128,7 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithTLSConfig("/path/to/ca.pem", "/path/to/cert.pem", ""),
+				WithSecretsPath("secret/data/"),
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
@@ -131,6 +141,7 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithTLSConfig("/path/to/ca.pem", "", "/path/to/key.pem"),
+				WithSecretsPath("secret/data/"),
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
@@ -143,6 +154,7 @@ func TestNewClient(t *testing.T) {
 				WithAddress("https://localhost:8200"),
 				WithToken("vault-token"),
 				WithTLSConfig("", "/path/to/cert.pem", "/path/to/key.pem"),
+				WithSecretsPath("secret/data/"),
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
@@ -156,6 +168,7 @@ func TestNewClient(t *testing.T) {
 				WithToken("vault-token"),
 				WithInsecureSkipTLS(true),
 				WithTLSConfig("", "/path/to/cert.pem", "/path/to/key.pem"),
+				WithSecretsPath("secret/data/"),
 			},
 			want: &Client{
 				address:         "https://localhost:8200",
@@ -164,8 +177,22 @@ func TestNewClient(t *testing.T) {
 				caPath:          "",
 				clientCertPath:  "/path/to/cert.pem",
 				clientKeyPath:   "/path/to/key.pem",
+				secretsPath:     "secret/data/",
 			},
 			wantErr: require.NoError,
+		},
+		{
+			name: "error case: secrets path is required",
+			options: []ClientOption{
+				WithAddress("https://localhost:8200"),
+				WithToken("vault-token"),
+				WithSecretsPath(""),
+				WithInsecureSkipTLS(true),
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "secrets path is required")
+			},
 		},
 	}
 

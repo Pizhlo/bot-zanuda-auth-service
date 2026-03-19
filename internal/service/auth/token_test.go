@@ -22,19 +22,44 @@ func TestCheckToken(t *testing.T) {
 		check func(err error, tt test, token *jwt.Token)
 	}
 
+	now := time.Now()
+	tokenDuration := 1 * time.Hour
+
 	// payload: {"user_id":123,"exp":1875018533}
-	token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMjMsImV4cCI6MTg3NTAxODUzM30.UumRMX7Y9tbgaflpAgNyzcy7BopB821isQ2M5BmSR3Y"
+	token := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}, []byte("secret"))
 
 	// payload: {"user_id":123,"exp":1717252133}
-	expiredToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoxMjMsImV4cCI6MTcxNzI1MjEzM30.qY_w-M4vQoUJTYwV8GmvEyVlsLus892YsuJHMXGsld8"
+	expiredToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(-1 * time.Second)),
+		},
+	}, []byte("secret"))
 
 	tests := []test{
 		{
 			name:  "positive case",
 			token: "Bearer " + token,
 			want: jwt.MapClaims{
-				"user_id": float64(123),
-				"exp":     float64(1875018533),
+				"scope": "bot",
+				"iss":   "test",
+				"sub":   "bot",
+				"aud":   []any{internalAPIAudience},
+				"iat":   float64(jwt.NewNumericDate(now).Unix()),
+				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
 			},
 			check: func(err error, tt test, token *jwt.Token) {
 				require.NoError(t, err)
@@ -66,8 +91,12 @@ func TestCheckToken(t *testing.T) {
 			name:  "error case: no 'Bearer' prefix",
 			token: token,
 			want: jwt.MapClaims{
-				"user_id": float64(123),
-				"exp":     float64(1875018533),
+				"scope": "bot",
+				"iss":   "test",
+				"sub":   "bot",
+				"aud":   []any{internalAPIAudience},
+				"iat":   float64(jwt.NewNumericDate(now).Unix()),
+				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
 			},
 			check: func(err error, tt test, token *jwt.Token) {
 				require.Error(t, err)
@@ -81,7 +110,7 @@ func TestCheckToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			auth := createTestAuthService(t, []byte("secret"))
+			auth := createTestAuthService(t, []byte("secret"), nil)
 			token, err := auth.CheckToken(tt.token)
 			tt.check(err, tt, token)
 		})
@@ -135,7 +164,7 @@ func TestGetPayload(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			auth := createTestAuthService(t, []byte("secret"))
+			auth := createTestAuthService(t, []byte("secret"), nil)
 			claims, ok := auth.GetPayload(tt.token)
 			assert.Equal(t, tt.wantOk, ok)
 			assert.Equal(t, tt.wantClaims, claims)
@@ -143,7 +172,42 @@ func TestGetPayload(t *testing.T) {
 	}
 }
 
-func createTestAuthService(t *testing.T, secretKey []byte) *Service {
+func TestGenerateToken(t *testing.T) {
+	t.Parallel()
+
+	auth := createTestAuthService(t, []byte("secret"), nil)
+	token, err := auth.generateToken(tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Second)),
+			Audience:  []string{internalAPIAudience},
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+
+	tokenJWT, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		return []byte("secret"), nil
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, tokenJWT)
+	require.True(t, tokenJWT.Valid)
+
+	claims, ok := auth.GetPayload(tokenJWT)
+	require.True(t, ok)
+	require.Equal(t, "bot", claims["scope"])
+	require.Equal(t, "test", claims["iss"])
+	require.Equal(t, "bot", claims["sub"])
+	require.Equal(t, []any{internalAPIAudience}, claims["aud"])
+	require.NotEmpty(t, claims["iat"])
+	require.NotEmpty(t, claims["exp"])
+}
+
+func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *testing.T, mockVaultClient *mocks.MockvaultClient, mockStorage *mocks.Mockstorage)) *Service {
 	t.Helper()
 
 	updateKey := 1 * time.Minute
@@ -151,9 +215,25 @@ func createTestAuthService(t *testing.T, secretKey []byte) *Service {
 	ctrl := gomock.NewController(t)
 
 	mockVaultClient := mocks.NewMockvaultClient(ctrl)
+	mockStorage := mocks.NewMockstorage(ctrl)
 
-	auth, err := New(WithSecretKey(secretKey), WithUpdateKeyInterval(updateKey), WithVaultClient(mockVaultClient))
+	if setupMocks != nil {
+		setupMocks(t, mockVaultClient, mockStorage)
+	}
+
+	auth, err := New(WithSecretKey(secretKey), WithUpdateKeyInterval(updateKey), WithVaultClient(mockVaultClient), WithStorage(mockStorage), WithIssuer("test"), WithTokenDuration(time.Second))
 	require.NoError(t, err)
 
 	return auth
+}
+
+func generateTestToken(t *testing.T, claims tokenClaims, secretKey []byte) string {
+	t.Helper()
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signed, err := token.SignedString(secretKey)
+	require.NoError(t, err)
+
+	return signed
 }

@@ -25,7 +25,7 @@ CREATE SCHEMA IF NOT EXISTS notes;
 CREATE TABLE IF NOT EXISTS notes.notes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     space_id        uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    author_id       uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    author_id       uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
 
     visibility_type note_visibility_type NOT NULL DEFAULT 'SPACE',
 
@@ -46,7 +46,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS notes.note_acl (
     id          BIGSERIAL PRIMARY KEY,
     note_id     uuid NOT NULL REFERENCES notes.notes(id) ON DELETE CASCADE,
-    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
 
     access      note_acl_access NOT NULL,  -- ALLOW / DENY
     can_read    BOOLEAN,                   -- NULL = не переопределяем
