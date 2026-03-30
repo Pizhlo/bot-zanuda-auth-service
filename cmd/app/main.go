@@ -94,8 +94,8 @@ func main() {
 	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
 
 	authHandler := initAuthHandler(authSvc)
-
-	handlerV0 := initHandlerV0(butler.BuildInfo, politicsSvc, authHandler)
+	notesHandler := initNotesHandler(politicsSvc)
+	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler)
 	middlewareHandler := initMiddlewareHandler(authSvc)
 	server := initServer(handlerV0, middlewareHandler, config.Server)
 
@@ -192,7 +192,17 @@ func initAuthHandler(authSrv *auth.Service) *handlerV0.AuthHandler {
 	)
 }
 
-func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService, auth *handlerV0.AuthHandler) *handlerV0.Handler {
+func initNotesHandler(politicsSvc *politics.Service) *handlerV0.NotesHandler {
+	logrus.Info("initializing notes handler")
+
+	return start(
+		handlerV0.NewNotesHandler(
+			handlerV0.WithPoliticsService(politicsSvc),
+		),
+	)
+}
+
+func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *handlerV0.AuthHandler) *handlerV0.Handler {
 	logrus.WithFields(logrus.Fields{
 		"version":   buildInfo.Version,
 		"buildDate": buildInfo.BuildDate,
@@ -204,7 +214,7 @@ func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService, aut
 			handlerV0.WithVersion(buildInfo.Version),
 			handlerV0.WithBuildDate(buildInfo.BuildDate),
 			handlerV0.WithGitCommit(buildInfo.GitCommit),
-			handlerV0.WithPoliticsService(politics),
+			handlerV0.WithNotesHandler(notes),
 			handlerV0.WithAuthHandler(auth),
 		),
 	)

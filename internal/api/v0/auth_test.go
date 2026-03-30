@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:dupl // дублирование, т.к. схожи тест-кейсы для разных хендлеров
 func TestNewAuthHandler(t *testing.T) {
 	t.Parallel()
 

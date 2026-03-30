@@ -19,45 +19,45 @@ func TestNewHandler(t *testing.T) {
 
 	type test struct {
 		name     string
-		opts     func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption
+		opts     func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption
 		wantErr  require.ErrorAssertionFunc
-		makeWant func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler
+		makeWant func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler
 	}
 
 	tests := []test{
 		{
 			name: "success",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
 					WithAuthHandler(authHandler),
-					WithPoliticsService(politicsSvc),
+					WithNotesHandler(notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
 				}
 			},
 			wantErr: require.NoError,
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				return &Handler{
-					version:         "1.0.0",
-					buildDate:       "2021-01-01",
-					gitCommit:       "1234567890",
-					apiVersion:      Version0,
-					PoliticsService: politicsSvc,
-					auth:            authHandler,
+					version:    "1.0.0",
+					buildDate:  "2021-01-01",
+					gitCommit:  "1234567890",
+					apiVersion: Version0,
+					notes:      notesHandler,
+					auth:       authHandler,
 				}
 			},
 		},
 		{
 			name: "version is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
 					WithAuthHandler(authHandler),
-					WithPoliticsService(politicsSvc),
+					WithNotesHandler(notesHandler),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
 				}
@@ -66,7 +66,7 @@ func TestNewHandler(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "version is required")
 			},
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				t.Helper()
 
 				return nil
@@ -74,12 +74,12 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "buildDate is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
 					WithAuthHandler(authHandler),
-					WithPoliticsService(politicsSvc),
+					WithNotesHandler(notesHandler),
 					WithVersion("1.0.0"),
 					WithGitCommit("1234567890"),
 				}
@@ -88,7 +88,7 @@ func TestNewHandler(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "buildDate is required")
 			},
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				t.Helper()
 
 				return nil
@@ -96,12 +96,12 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "gitCommit is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
 					WithAuthHandler(authHandler),
-					WithPoliticsService(politicsSvc),
+					WithNotesHandler(notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 				}
@@ -110,15 +110,15 @@ func TestNewHandler(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "gitCommit is required")
 			},
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				t.Helper()
 
 				return nil
 			},
 		},
 		{
-			name: "politics service is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			name: "notes handler is required",
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
@@ -130,9 +130,9 @@ func TestNewHandler(t *testing.T) {
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
-				require.ErrorContains(t, err, "politics service is required")
+				require.ErrorContains(t, err, "notes handler is required")
 			},
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				t.Helper()
 
 				return nil
@@ -140,11 +140,11 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "auth handler is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithPoliticsService(politicsSvc),
+					WithNotesHandler(notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
@@ -154,7 +154,7 @@ func TestNewHandler(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "auth handler is required")
 			},
-			makeWant: func(politicsSvc *mocks.MockPoliticsService, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
 				t.Helper()
 
 				return nil
@@ -169,13 +169,13 @@ func TestNewHandler(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			politicsSvc := mocks.NewMockPoliticsService(ctrl)
+			notesHandler := mocks.NewMocknotesProcessorHandler(ctrl)
 			authHandler := mocks.NewMockauthProcessorHandler(ctrl)
 
-			handler, err := NewHandler(tt.opts(t, ctrl, politicsSvc, authHandler)...)
+			handler, err := NewHandler(tt.opts(t, ctrl, notesHandler, authHandler)...)
 
 			tt.wantErr(t, err)
-			assert.Equal(t, tt.makeWant(politicsSvc, authHandler), handler)
+			assert.Equal(t, tt.makeWant(notesHandler, authHandler), handler)
 		})
 	}
 }
@@ -186,20 +186,15 @@ func TestHandler_Version(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	politicsSvc := mocks.NewMockPoliticsService(ctrl)
+	notesHandler := mocks.NewMocknotesProcessorHandler(ctrl)
 
-	authSvc := mocks.NewMockauthSerivce(ctrl)
-
-	authHandler, err := NewAuthHandler(
-		WithAuthService(authSvc),
-	)
-	require.NoError(t, err)
+	authHandler := mocks.NewMockauthProcessorHandler(ctrl)
 
 	handler, err := NewHandler(
 		WithVersion("1.0.0"),
 		WithBuildDate("2021-01-01"),
 		WithGitCommit("1234567890"),
-		WithPoliticsService(politicsSvc),
+		WithNotesHandler(notesHandler),
 		WithAuthHandler(authHandler),
 	)
 
