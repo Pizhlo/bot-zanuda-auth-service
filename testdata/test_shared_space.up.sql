@@ -1,14 +1,30 @@
 -- новые пользователи - тестовые участники 
-INSERT INTO users.telegram (id, tg_id, global_invite_policy) VALUES (
-    'd1b3a949-8565-4268-8c72-6d27247cbaa5', 22222, 'ALLOW_ALL' -- ADMIN
+
+-- ADMIN
+INSERT INTO users.users(id) VALUES (
+    'd1b3a949-8565-4268-8c72-6d27247cbaa5'
 );
 
-INSERT INTO users.telegram (id, tg_id, global_invite_policy) VALUES (
-    '33fd6e4c-26d3-45a6-93e2-3a0514cfac5a', 33333, 'ALLOW_ALL' -- EDITOR
+INSERT INTO users.telegram (id, tg_id, user_id, global_invite_policy) VALUES (
+    '8360f28c-ef3d-40b8-99f9-a11a7a4b8ae8', 22222, 'd1b3a949-8565-4268-8c72-6d27247cbaa5', 'ALLOW_ALL'
 );
 
-INSERT INTO users.telegram (id, tg_id, global_invite_policy) VALUES (
-    '0e9c136b-eee9-4d2b-bba3-fc32a9b5f2b4', 44444, 'ALLOW_ALL' -- VIEWER
+-- EDITOR
+INSERT INTO users.users(id) VALUES (
+    '33fd6e4c-26d3-45a6-93e2-3a0514cfac5a'
+);
+
+INSERT INTO users.telegram (id, tg_id, user_id, global_invite_policy) VALUES (
+    'eb926322-662f-43a0-987b-bbaf1fd6f029', 33333, '33fd6e4c-26d3-45a6-93e2-3a0514cfac5a', 'ALLOW_ALL'
+);
+
+-- VIEWER
+INSERT INTO users.users(id) VALUES (
+    '0e9c136b-eee9-4d2b-bba3-fc32a9b5f2b4'
+);
+
+INSERT INTO users.telegram (id, tg_id, user_id, global_invite_policy) VALUES (
+    'cf8314cb-f864-4c9c-9582-db76c9e3f16f', 44444, '0e9c136b-eee9-4d2b-bba3-fc32a9b5f2b4', 'ALLOW_ALL' 
 );
 
 -- совместное пространство

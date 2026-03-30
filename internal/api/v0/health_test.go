@@ -24,11 +24,12 @@ func TestHealth(t *testing.T) {
 
 	politicsSvc := mocks.NewMockPoliticsService(ctrl)
 
-	handler, err := New(
+	handler, err := NewHandler(
 		WithVersion(version),
 		WithBuildDate(buildDate),
 		WithGitCommit(gitCommit),
 		WithPoliticsService(politicsSvc),
+		WithAuthHandler(mocks.NewMockauthProcessorHandler(ctrl)),
 	)
 	require.NoError(t, err)
 

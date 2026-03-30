@@ -35,11 +35,17 @@ type handler interface {
 	healthHandler
 	versionHandler
 	notesEditor
+	authHandler
 }
 
 type versionHandler interface {
 	// Version возвращает версию апи хендлера, чтобы нельзя было использовать хендлер не той версии.
 	Version() string
+}
+
+type authHandler interface {
+	// Login проверяет корректность полученных данных и отправляет в ответ JWT-токен.
+	Login(c echo.Context) error
 }
 
 type healthHandler interface {
@@ -185,9 +191,10 @@ func (s *Server) createRoutes() error {
 
 	// auth
 	auth := apiv0.Group("auth/")
-	auth.Use(s.api.middleware.CheckToken)
 
-	auth.POST("notes/filter", s.api.h0.FilterNotes)
+	auth.POST("login", s.api.h0.Login)
+
+	auth.POST("notes/filter", s.api.h0.FilterNotes, s.api.middleware.CheckToken)
 
 	s.e = e
 

@@ -5,6 +5,10 @@
 package mocks
 
 import (
+	model "auth-service/internal/model"
+	context "context"
+	reflect "reflect"
+
 	gomock "github.com/golang/mock/gomock"
 )
 
@@ -29,4 +33,57 @@ func NewMockvaultClient(ctrl *gomock.Controller) *MockvaultClient {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockvaultClient) EXPECT() *MockvaultClientMockRecorder {
 	return m.recorder
+}
+
+// GetClientSecret mocks base method.
+func (m *MockvaultClient) GetClientSecret(clientID string) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetClientSecret", clientID)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetClientSecret indicates an expected call of GetClientSecret.
+func (mr *MockvaultClientMockRecorder) GetClientSecret(clientID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClientSecret", reflect.TypeOf((*MockvaultClient)(nil).GetClientSecret), clientID)
+}
+
+// Mockstorage is a mock of storage interface.
+type Mockstorage struct {
+	ctrl     *gomock.Controller
+	recorder *MockstorageMockRecorder
+}
+
+// MockstorageMockRecorder is the mock recorder for Mockstorage.
+type MockstorageMockRecorder struct {
+	mock *Mockstorage
+}
+
+// NewMockstorage creates a new mock instance.
+func NewMockstorage(ctrl *gomock.Controller) *Mockstorage {
+	mock := &Mockstorage{ctrl: ctrl}
+	mock.recorder = &MockstorageMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *Mockstorage) EXPECT() *MockstorageMockRecorder {
+	return m.recorder
+}
+
+// GetServiceClient mocks base method.
+func (m *Mockstorage) GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetServiceClient", ctx, clientID)
+	ret0, _ := ret[0].(model.ServiceClient)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetServiceClient indicates an expected call of GetServiceClient.
+func (mr *MockstorageMockRecorder) GetServiceClient(ctx, clientID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetServiceClient", reflect.TypeOf((*Mockstorage)(nil).GetServiceClient), ctx, clientID)
 }

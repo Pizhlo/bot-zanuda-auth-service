@@ -11,6 +11,8 @@ policy:
 auth:
   update_key_interval: 1h
   secret_key: your-key
+  issuer: "zanuda-auth-service"
+  token_duration: 1h
 
 vault:
   address: "https://localhost:8200"
@@ -21,6 +23,7 @@ vault:
   # ca_path: "./vault/ca.crt"
   # client_cert_path: "./vault/client.crt"
   # client_key_path: "./vault/client.key"
+  secrets_path: "secret/data/"
 
 # пример конфигурации для одиночного Redis
   redis:

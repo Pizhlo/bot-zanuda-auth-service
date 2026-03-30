@@ -28,8 +28,9 @@ func TestLoadConfig(t *testing.T) {
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
 				Vault: Vault{
-					Address: "https://localhost:8200",
-					Token:   "vault-token",
+					Address:     "https://localhost:8200",
+					Token:       "vault-token",
+					SecretsPath: "secret/data",
 				},
 				Redis: Redis{
 					Type: RedisTypeSingle,
@@ -48,6 +49,8 @@ func TestLoadConfig(t *testing.T) {
 				Auth: Auth{
 					SecretKey:         "your-key",
 					UpdateKeyInterval: 1 * time.Hour,
+					Issuer:            "test",
+					TokenDuration:     1 * time.Hour,
 				},
 				Policy: Policy{
 					Config: "casbin_model.conf",

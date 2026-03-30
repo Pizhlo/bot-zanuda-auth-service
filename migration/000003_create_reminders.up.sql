@@ -6,7 +6,7 @@ CREATE SCHEMA IF NOT EXISTS reminders;
 CREATE TABLE IF NOT EXISTS reminders.reminders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     space_id    uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    author_id   uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    author_id   uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
 
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS reminders.reminders (
 -- Кому летит напоминание и какие у него перс. права
 CREATE TABLE IF NOT EXISTS reminders.reminder_recipient (
     reminder_id uuid NOT NULL REFERENCES reminders.reminders(id) ON DELETE CASCADE,
-    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
 
     can_stop    BOOLEAN,        -- NULL = по роли, TRUE/FALSE = override
 

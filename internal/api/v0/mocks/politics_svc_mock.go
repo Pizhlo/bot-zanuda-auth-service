@@ -11,6 +11,7 @@ import (
 
 	gomock "github.com/golang/mock/gomock"
 	uuid "github.com/google/uuid"
+	echo "github.com/labstack/echo/v4"
 )
 
 // MockPoliticsService is a mock of PoliticsService interface.
@@ -49,4 +50,41 @@ func (m *MockPoliticsService) FilterNotes(ctx context.Context, req model.FilterN
 func (mr *MockPoliticsServiceMockRecorder) FilterNotes(ctx, req interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterNotes", reflect.TypeOf((*MockPoliticsService)(nil).FilterNotes), ctx, req)
+}
+
+// MockauthProcessorHandler is a mock of authProcessorHandler interface.
+type MockauthProcessorHandler struct {
+	ctrl     *gomock.Controller
+	recorder *MockauthProcessorHandlerMockRecorder
+}
+
+// MockauthProcessorHandlerMockRecorder is the mock recorder for MockauthProcessorHandler.
+type MockauthProcessorHandlerMockRecorder struct {
+	mock *MockauthProcessorHandler
+}
+
+// NewMockauthProcessorHandler creates a new mock instance.
+func NewMockauthProcessorHandler(ctrl *gomock.Controller) *MockauthProcessorHandler {
+	mock := &MockauthProcessorHandler{ctrl: ctrl}
+	mock.recorder = &MockauthProcessorHandlerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockauthProcessorHandler) EXPECT() *MockauthProcessorHandlerMockRecorder {
+	return m.recorder
+}
+
+// Login mocks base method.
+func (m *MockauthProcessorHandler) Login(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Login", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Login indicates an expected call of Login.
+func (mr *MockauthProcessorHandlerMockRecorder) Login(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*MockauthProcessorHandler)(nil).Login), c)
 }

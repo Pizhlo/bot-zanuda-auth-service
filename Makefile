@@ -237,7 +237,7 @@ export POSTGRES_DB
 export POSTGRES_HOST
 export POSTGRES_PORT
 
-DB_URL=postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
+DB_URL=postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable&search_path=public
 
 migrate-up:
 	migrate -path ./migration -database "$(DB_URL)" -verbose up

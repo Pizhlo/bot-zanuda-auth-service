@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"auth-service/internal/model"
+	"context"
 	"errors"
 	"time"
 )
@@ -11,13 +13,20 @@ type Service struct {
 	updateKeyInterval time.Duration // периодичность, с которой нужно обновлять ключ
 	vaultClient       vaultClient   // клиент для доступа к vault
 	secretKey         []byte
+	tokenDuration     time.Duration
+	storage           storage
+	issuer            string
 }
 
 // vaultClient - интерфейс для доступа к vault.
 //
 //go:generate mockgen -source=service.go -destination=mocks/mocks.go -package=mocks
 type vaultClient interface {
-	// здесь методы для доступа к vault
+	GetClientSecret(clientID string) (string, error)
+}
+
+type storage interface {
+	GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error)
 }
 
 type option func(*Service)
@@ -43,6 +52,27 @@ func WithVaultClient(client vaultClient) option {
 	}
 }
 
+// WithIssuer устанавливает issuer для генерации токена.
+func WithIssuer(issuer string) option {
+	return func(s *Service) {
+		s.issuer = issuer
+	}
+}
+
+// WithTokenDuration устанавливает duration для генерации токена.
+func WithTokenDuration(duration time.Duration) option {
+	return func(s *Service) {
+		s.tokenDuration = duration
+	}
+}
+
+// WithStorage устанавливает хранилище для сервиса.
+func WithStorage(storage storage) option {
+	return func(s *Service) {
+		s.storage = storage
+	}
+}
+
 // New создает новый сервис для работы с авторизацией.
 func New(opts ...option) (*Service, error) {
 	s := &Service{}
@@ -51,8 +81,8 @@ func New(opts ...option) (*Service, error) {
 		opt(s)
 	}
 
-	if s.updateKeyInterval == 0 {
-		return nil, errors.New("update key interval is required")
+	if s.updateKeyInterval <= 0 {
+		return nil, errors.New("update key interval must be greater than 0")
 	}
 
 	if s.vaultClient == nil {
@@ -61,6 +91,18 @@ func New(opts ...option) (*Service, error) {
 
 	if len(s.secretKey) == 0 {
 		return nil, errors.New("secret key is required")
+	}
+
+	if s.storage == nil {
+		return nil, errors.New("storage is required")
+	}
+
+	if s.issuer == "" {
+		return nil, errors.New("issuer is required")
+	}
+
+	if s.tokenDuration <= 0 {
+		return nil, errors.New("token duration must be greater than 0")
 	}
 
 	return s, nil

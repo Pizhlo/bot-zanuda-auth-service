@@ -10,10 +10,13 @@ policy:
 auth:
   update_key_interval: 1h
   secret_key: your-key
+  issuer: "test"
+  token_duration: 1h
 
 vault:
   address: "https://localhost:8200"
   token: "vault-token"
+  secrets_path: "secret/data"
 
 redis:
   type: "single"

@@ -5,16 +5,25 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 ALTER TABLE public.schema_migrations 
   ADD COLUMN IF NOT EXISTS created TIMESTAMP NOT NULL DEFAULT now();
 
-CREATE SCHEMA  IF NOT EXISTS users;
+CREATE SCHEMA IF NOT EXISTS users;
+
+-- Глобальные пользователи
+CREATE TABLE users.users (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- Пользователь
 CREATE TABLE IF NOT EXISTS users.telegram (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     tg_id           BIGINT UNIQUE NOT NULL,
-
+    user_id         UUID NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
     global_invite_policy VARCHAR(32) NOT NULL DEFAULT 'ALLOW_ALL',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_telegram_user_id ON users.telegram(user_id);
 
 DO $$
 BEGIN
@@ -48,11 +57,13 @@ END $$;
 CREATE TABLE IF NOT EXISTS spaces.spaces (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type                space_type NOT NULL DEFAULT 'PERSONAL',
-    owner_id            uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    owner_id            uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
     default_participant_role VARCHAR(64) NOT NULL DEFAULT 'EDITOR',
 
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE INDEX IF NOT EXISTS idx_spaces_owner_id ON spaces.spaces(owner_id);
 
 -- Роль в пространстве (глобальный шаблон)
 CREATE TABLE IF NOT EXISTS spaces.space_role (
@@ -278,17 +289,20 @@ END $$;
 -- При удалении роли переводим участников в роль VIEWER (триггер ниже)
 CREATE TABLE IF NOT EXISTS spaces.space_member (
     space_id    uuid NOT NULL REFERENCES spaces.spaces(id) ON DELETE CASCADE,
-    user_id     uuid NOT NULL REFERENCES users.telegram(id) ON DELETE CASCADE,
+    user_id     uuid NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
     role_id     BIGINT NOT NULL REFERENCES spaces.space_role(id) ON DELETE NO ACTION,
-    invited_by  uuid REFERENCES users.telegram(id) ON DELETE SET NULL,
+    invited_by  uuid REFERENCES users.users(id) ON DELETE SET NULL,
     status      member_status NOT NULL DEFAULT 'INVITED',
 
     can_invite  BOOLEAN NOT NULL DEFAULT true,   -- NULL = по роли, TRUE = разрешаем даже если роль не может
 
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     PRIMARY KEY (space_id, user_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_space_member_user_id ON spaces.space_member(user_id);
+CREATE INDEX IF NOT EXISTS idx_space_member_invited_by ON spaces.space_member(invited_by);
 
 -- При удалении роли переводим участников в роль VIEWER
 CREATE OR REPLACE FUNCTION spaces.on_space_role_delete_set_viewer()

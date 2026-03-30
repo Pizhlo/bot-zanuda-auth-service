@@ -27,5 +27,7 @@ DROP TABLE IF EXISTS users.telegram CASCADE;
 ALTER TABLE IF EXISTS public.schema_migrations
   DROP COLUMN created;
 
+DROP TABLE IF EXISTS users.users;
+
 DROP SCHEMA IF EXISTS spaces CASCADE;
 DROP SCHEMA IF EXISTS users CASCADE;

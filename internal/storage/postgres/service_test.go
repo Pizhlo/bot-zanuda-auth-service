@@ -1,4 +1,4 @@
-package politics
+package postgres
 
 import (
 	"database/sql"

@@ -155,11 +155,12 @@ func TestHandler_FilterNotes(t *testing.T) {
 				tt.prepareMocks(politicsSvc)
 			}
 
-			h, err := New(
+			h, err := NewHandler(
 				WithVersion("1.0.0"),
 				WithBuildDate("2021-01-01"),
 				WithGitCommit("1234567890"),
 				WithPoliticsService(politicsSvc),
+				WithAuthHandler(mocks.NewMockauthProcessorHandler(ctrl)),
 			)
 			require.NoError(t, err)
 
