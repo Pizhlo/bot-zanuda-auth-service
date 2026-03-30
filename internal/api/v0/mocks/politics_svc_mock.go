@@ -50,3 +50,41 @@ func (mr *MockPoliticsServiceMockRecorder) FilterNotes(ctx, req interface{}) *go
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterNotes", reflect.TypeOf((*MockPoliticsService)(nil).FilterNotes), ctx, req)
 }
+
+// MockuserService is a mock of userService interface.
+type MockuserService struct {
+	ctrl     *gomock.Controller
+	recorder *MockuserServiceMockRecorder
+}
+
+// MockuserServiceMockRecorder is the mock recorder for MockuserService.
+type MockuserServiceMockRecorder struct {
+	mock *MockuserService
+}
+
+// NewMockuserService creates a new mock instance.
+func NewMockuserService(ctrl *gomock.Controller) *MockuserService {
+	mock := &MockuserService{ctrl: ctrl}
+	mock.recorder = &MockuserServiceMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockuserService) EXPECT() *MockuserServiceMockRecorder {
+	return m.recorder
+}
+
+// GetUserIDByTelegramID mocks base method.
+func (m *MockuserService) GetUserIDByTelegramID(ctx context.Context, telegramID string) (uuid.UUID, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUserIDByTelegramID", ctx, telegramID)
+	ret0, _ := ret[0].(uuid.UUID)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUserIDByTelegramID indicates an expected call of GetUserIDByTelegramID.
+func (mr *MockuserServiceMockRecorder) GetUserIDByTelegramID(ctx, telegramID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserIDByTelegramID", reflect.TypeOf((*MockuserService)(nil).GetUserIDByTelegramID), ctx, telegramID)
+}

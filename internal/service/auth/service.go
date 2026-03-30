@@ -107,3 +107,13 @@ func New(opts ...option) (*Service, error) {
 
 	return s, nil
 }
+
+// GetIssuer возвращает issuer для генерации токена.
+func (s *Service) GetIssuer() string {
+	return s.issuer
+}
+
+// GetServiceClient возвращает клиента по clientID.
+func (s *Service) GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error) {
+	return s.storage.GetServiceClient(ctx, clientID)
+}

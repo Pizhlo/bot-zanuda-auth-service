@@ -13,6 +13,7 @@ auth:
   secret_key: your-key
   issuer: "zanuda-auth-service"
   token_duration: 1h
+  user_cache_ttl: 1h
 
 vault:
   address: "https://localhost:8200"

@@ -23,10 +23,11 @@ type Config struct {
 
 // Auth - данные для работы Auth-сервиса.
 type Auth struct {
-	SecretKey         string        `yaml:"secret_key" validate:"required"`           // секретный ключ для генерации токена.
-	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required"`  // интервал для обновления апи-ключа в Vault.
-	Issuer            string        `yaml:"issuer" validate:"required"`               // issuer для генерации токена.
-	TokenDuration     time.Duration `yaml:"token_duration" validate:"required,min=1"` // duration access токена.
+	SecretKey         string        `yaml:"secret_key" validate:"required"`            // секретный ключ для генерации токена.
+	UpdateKeyInterval time.Duration `yaml:"update_key_interval" validate:"required"`   // интервал для обновления апи-ключа в Vault.
+	Issuer            string        `yaml:"issuer" validate:"required"`                // issuer для генерации токена.
+	TokenDuration     time.Duration `yaml:"token_duration" validate:"required,min=1"`  // duration access токена.
+	UserCacheTTL      time.Duration `yaml:"user_cache_ttl" validate:"required,min=1s"` // duration кэша пользователей.
 }
 
 // Server - конфигурация сервера.

@@ -1,9 +1,12 @@
 package v0
 
 import (
+	"auth-service/internal/model"
+	"auth-service/internal/storage"
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
@@ -21,6 +24,8 @@ type MiddlewareHandler struct {
 type AuthService interface {
 	CheckToken(authHeader string) (*jwt.Token, error)
 	GetPayload(token *jwt.Token) (jwt.MapClaims, bool)
+	GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error)
+	GetIssuer() string
 }
 
 type option func(*MiddlewareHandler)
@@ -49,9 +54,12 @@ func NewMiddlewareHandler(opts ...option) (*MiddlewareHandler, error) {
 	return h, nil
 }
 
-// CheckToken проверяет токен из запроса. Проверяет на expired, а также наличие user_id.
+// CheckToken проверяет токен из запроса. Также проверяет хедер X-Telegram-User-Id.
+// Токен должен быть валидным, не просроченным и иметь scope bot.
 func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
+		const userIDHeader = "X-Telegram-User-Id"
+
 		tokenHeader := c.Request().Header.Get("Authorization")
 
 		token, err := s.authService.CheckToken(tokenHeader)
@@ -64,14 +72,22 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token: no payload"})
 		}
 
-		userIDAny, ok := payload["user_id"]
-		if !ok {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token: field 'user_id' not found"})
+		if code, err := s.verifyPayload(c.Request().Context(), payload); err != nil {
+			return c.JSON(code, map[string]string{"error": err.Error()})
 		}
 
-		userID := parseUserID(userIDAny)
+		logrus.WithFields(logrus.Fields{
+			"client_id": payload["sub"],
+			"issuer":    payload["iss"],
+			"scope":     payload["scope"],
+			"exp":       payload["exp"],
+			"iat":       payload["iat"],
+			"aud":       payload["aud"],
+		}).Debug("check token: payload verified")
+
+		userID := c.Request().Header.Get(userIDHeader)
 		if userID == "" {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token: invalid type of field 'user_id'"})
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid request: header 'X-Telegram-User-Id' not found"})
 		}
 
 		ctx := withUserID(c.Request().Context(), userID)
@@ -82,6 +98,40 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return next(c)
 	}
+}
+
+// verifyPayload проверяет payload токена на валидность.
+// Возвращает код статуса и ошибку.
+// 0 - если payload валидный.
+func (s *MiddlewareHandler) verifyPayload(ctx context.Context, payload jwt.MapClaims) (int, error) {
+	clientID, ok := payload["sub"].(string)
+	if !ok || clientID == "" {
+		return http.StatusUnauthorized, errors.New("invalid token: invalid client id")
+	}
+
+	scope, ok := payload["scope"].(string)
+	if !ok || scope == "" {
+		return http.StatusUnauthorized, errors.New("invalid token: invalid scope")
+	}
+
+	client, err := s.authService.GetServiceClient(ctx, clientID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return http.StatusUnauthorized, errors.New("invalid client")
+		}
+
+		return http.StatusInternalServerError, errors.New("internal server error")
+	}
+
+	if !client.IsActive {
+		return http.StatusUnauthorized, errors.New("client is inactive")
+	}
+
+	if !slices.Contains(client.Scopes, scope) {
+		return http.StatusUnauthorized, errors.New("client does not have required scope")
+	}
+
+	return 0, nil
 }
 
 type withUserIDCtxKey struct{}

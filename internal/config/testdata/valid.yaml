@@ -12,6 +12,7 @@ auth:
   secret_key: your-key
   issuer: "test"
   token_duration: 1h
+  user_cache_ttl: 1h
 
 vault:
   address: "https://localhost:8200"

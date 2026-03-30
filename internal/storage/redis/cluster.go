@@ -4,6 +4,7 @@ import (
 	"auth-service/internal/config"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
@@ -51,4 +52,12 @@ func (c *cluster) Close(ctx context.Context) error {
 	}).Info("closing cluster client for redis cluster")
 
 	return c.cache.Close()
+}
+
+func (c *cluster) Get(ctx context.Context, key string) (any, error) {
+	return c.cache.Get(ctx, key).Result()
+}
+
+func (c *cluster) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
+	return c.cache.Set(ctx, key, value, ttl).Err()
 }

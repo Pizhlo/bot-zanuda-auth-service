@@ -3,6 +3,7 @@ package v0
 import (
 	"auth-service/internal/model"
 	"auth-service/internal/service"
+	"auth-service/internal/storage"
 	"context"
 	"errors"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 // NotesHandler хендлер для работы с заметками.
 type NotesHandler struct {
 	politicsService PoliticsService
+	userSvc         userService
 }
 
 // PoliticsService - интерфейс для доступа к сервису политик. Отвечает за доступ пользователей к данным.
@@ -27,12 +29,23 @@ type PoliticsService interface {
 	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error)
 }
 
+type userService interface {
+	GetUserIDByTelegramID(ctx context.Context, telegramID string) (uuid.UUID, error)
+}
+
 type notesHandlerOption func(*NotesHandler)
 
 // WithPoliticsService устанавливает сервис политик.
 func WithPoliticsService(svc PoliticsService) notesHandlerOption {
 	return func(h *NotesHandler) {
 		h.politicsService = svc
+	}
+}
+
+// WithUserService устанавливает сервис пользователей.
+func WithUserService(svc userService) notesHandlerOption {
+	return func(h *NotesHandler) {
+		h.userSvc = svc
 	}
 }
 
@@ -46,6 +59,10 @@ func NewNotesHandler(opts ...notesHandlerOption) (*NotesHandler, error) {
 
 	if h.politicsService == nil {
 		return nil, errors.New("politics service is required")
+	}
+
+	if h.userSvc == nil {
+		return nil, errors.New("user service is required")
 	}
 
 	logrus.Info("created notes handler")
@@ -94,9 +111,14 @@ func (s *NotesHandler) FilterNotes(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no user in context"})
 	}
 
-	userIDUUID, err := uuid.Parse(userID)
+	userIDUUID, err := s.userSvc.GetUserIDByTelegramID(c.Request().Context(), userID)
 	if err != nil {
-		logrus.WithError(err).Error("error parsing user id")
+		if errors.Is(err, storage.ErrNotFound) {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "user not found"})
+		}
+
+		logrus.WithError(err).Error("error getting user id by telegram id")
+
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 	}
 

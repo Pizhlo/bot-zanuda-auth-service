@@ -1,11 +1,14 @@
 package auth
 
 import (
+	"auth-service/internal/model"
 	"auth-service/internal/service/auth/mocks"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -203,6 +206,83 @@ func TestNewService(t *testing.T) {
 			tt.wantErr(t, err)
 
 			assert.Equal(t, tt.createWant(t, mockVaultClient, mockStorage), got)
+		})
+	}
+}
+
+func TestGetIssuer(t *testing.T) {
+	t.Parallel()
+
+	svc := createTestAuthService(t, []byte("abc"), nil)
+	require.Equal(t, "test", svc.GetIssuer())
+}
+
+//nolint:funlen // длинный тест - это ок
+func TestGetServiceClient(t *testing.T) {
+	t.Parallel()
+
+	clientID := "test"
+	id := uuid.New()
+
+	now := time.Now()
+
+	tests := []struct {
+		name       string
+		setupMocks func(t *testing.T, mockVaultClient *mocks.MockvaultClient, mockStorage *mocks.Mockstorage)
+		want       model.ServiceClient
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{
+			name: "positive case",
+			setupMocks: func(t *testing.T, mockVaultClient *mocks.MockvaultClient, mockStorage *mocks.Mockstorage) {
+				t.Helper()
+
+				mockStorage.EXPECT().GetServiceClient(gomock.Any(), gomock.Any()).Return(model.ServiceClient{
+					ID:         id,
+					ClientID:   "test",
+					ClientName: "test",
+					Scopes:     []string{string(model.BotScope)},
+					IsActive:   true,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+				}, nil)
+			},
+			want: model.ServiceClient{
+				ID:         id,
+				ClientID:   "test",
+				ClientName: "test",
+				Scopes:     []string{string(model.BotScope)},
+				IsActive:   true,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "error case",
+			setupMocks: func(t *testing.T, mockVaultClient *mocks.MockvaultClient, mockStorage *mocks.Mockstorage) {
+				t.Helper()
+
+				mockStorage.EXPECT().GetServiceClient(gomock.Any(), gomock.Any()).Return(model.ServiceClient{}, errors.New("error"))
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			svc := createTestAuthService(t, []byte("abc"), tt.setupMocks)
+			got, err := svc.GetServiceClient(t.Context(), clientID)
+			tt.wantErr(t, err)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
