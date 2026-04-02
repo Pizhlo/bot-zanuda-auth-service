@@ -11,38 +11,57 @@ import (
 
 // CheckToken проверяет токен на валидность: поле exp и наличие payload.
 func (s *Service) CheckToken(authHeader string) (*jwt.Token, error) {
-	logrus.Debug("check token")
+	logrus.Debug("checking token")
 
-	if !strings.HasPrefix(authHeader, "Bearer") {
+	scheme, tokenString, ok := strings.Cut(authHeader, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
 		return nil, errors.New("invalid token: no prefix Bearer")
 	}
 
-	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-
-	token, err := s.ParseToken(tokenString)
-	if err != nil || !token.Valid {
-		return nil, fmt.Errorf("invalid token: %v", err)
+	tokenString = strings.TrimSpace(tokenString)
+	if tokenString == "" {
+		return nil, errors.New("invalid token: empty bearer token")
 	}
 
-	_, ok := s.GetPayload(token)
-	if !ok {
-		return nil, errors.New("no payload found")
-	}
+	claims := jwt.MapClaims{}
 
-	return token, nil
-}
-
-// ParseToken парсит токен в виде строки и возвращает *jwt.Token.
-func (s *Service) ParseToken(tokenString string) (*jwt.Token, error) {
-	logrus.Debug("parsing token")
-
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}
 
 		return s.secretKey, nil
-	})
+	},
+		jwt.WithValidMethods([]string{"HS256"}), // Защита от alg confusion
+		jwt.WithIssuer(s.issuer),                // Проверка iss
+		jwt.WithAudience(internalAPIAudience),   // Проверка aud
+		jwt.WithExpirationRequired(),            // Обязательный exp
+		// WithIssuedAt: если iat есть — проверить, что токен не «из будущего» (сам claim по RFC опционален).
+		jwt.WithIssuedAt(),
+	)
+	if err != nil {
+		logrus.WithError(err).Warn("token validation failed")
+		return nil, errors.New("invalid token")
+	}
+
+	iat, err := claims.GetIssuedAt()
+	if err != nil {
+		logrus.WithError(err).Warn("token validation failed")
+		return nil, errors.New("invalid token")
+	}
+
+	if iat == nil {
+		errMissing := fmt.Errorf("%w: %s", jwt.ErrTokenRequiredClaimMissing, "iat claim is required")
+		logrus.WithError(errMissing).Warn("token validation failed")
+
+		return nil, errors.New("invalid token")
+	}
+
+	if !token.Valid {
+		return nil, errors.New("token invalid")
+	}
+
+	return token, nil
 }
 
 // GetPayload возвращает информацию токена в виде map[string]any.

@@ -5,6 +5,8 @@
 package mocks
 
 import (
+	model "auth-service/internal/model"
+	context "context"
 	reflect "reflect"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -49,6 +51,20 @@ func (mr *MockAuthServiceMockRecorder) CheckToken(authHeader interface{}) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockAuthService)(nil).CheckToken), authHeader)
 }
 
+// GetIssuer mocks base method.
+func (m *MockAuthService) GetIssuer() string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetIssuer")
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// GetIssuer indicates an expected call of GetIssuer.
+func (mr *MockAuthServiceMockRecorder) GetIssuer() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIssuer", reflect.TypeOf((*MockAuthService)(nil).GetIssuer))
+}
+
 // GetPayload mocks base method.
 func (m *MockAuthService) GetPayload(token *jwt.Token) (jwt.MapClaims, bool) {
 	m.ctrl.T.Helper()
@@ -62,4 +78,19 @@ func (m *MockAuthService) GetPayload(token *jwt.Token) (jwt.MapClaims, bool) {
 func (mr *MockAuthServiceMockRecorder) GetPayload(token interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPayload", reflect.TypeOf((*MockAuthService)(nil).GetPayload), token)
+}
+
+// GetServiceClient mocks base method.
+func (m *MockAuthService) GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetServiceClient", ctx, clientID)
+	ret0, _ := ret[0].(model.ServiceClient)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetServiceClient indicates an expected call of GetServiceClient.
+func (mr *MockAuthServiceMockRecorder) GetServiceClient(ctx, clientID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetServiceClient", reflect.TypeOf((*MockAuthService)(nil).GetServiceClient), ctx, clientID)
 }

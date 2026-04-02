@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -27,6 +28,8 @@ type Service struct {
 type redisClient interface {
 	Connect(ctx context.Context) error
 	Close(ctx context.Context) error
+	Get(ctx context.Context, key string) (any, error)
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
 }
 
 // Option определяет опции для Service.
@@ -114,4 +117,30 @@ func (s *Service) Stop(ctx context.Context) error {
 	}
 
 	return s.client.Close(ctx)
+}
+
+// Get получает значение из Redis.
+func (s *Service) Get(ctx context.Context, key string) (any, error) {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("redis client is not connected")
+	}
+
+	return client.Get(ctx, key)
+}
+
+// Set устанавливает значение в Redis.
+func (s *Service) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
+	s.mu.Lock()
+	client := s.client
+	s.mu.Unlock()
+
+	if client == nil {
+		return fmt.Errorf("redis client is not connected")
+	}
+
+	return client.Set(ctx, key, value, ttl)
 }

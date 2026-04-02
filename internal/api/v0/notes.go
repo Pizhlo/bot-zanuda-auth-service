@@ -3,16 +3,72 @@ package v0
 import (
 	"auth-service/internal/model"
 	"auth-service/internal/service"
+	"auth-service/internal/storage"
 	"context"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
+
+// NotesHandler хендлер для работы с заметками.
+type NotesHandler struct {
+	politicsService PoliticsService
+	userSvc         userService
+}
+
+// PoliticsService - интерфейс для доступа к сервису политик. Отвечает за доступ пользователей к данным.
+//
+//go:generate mockgen -source=notes.go -destination=mocks/politics_svc_mock.go -package=mocks PoliticsService
+type PoliticsService interface {
+	// FilterNotes фильтрует входящие заметки согласно политикам.
+	// Возвращает только заметки, доступные пользователю, с флагом canEdit -
+	// может ли пользователь редактировать заметку.
+	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error)
+}
+
+type userService interface {
+	GetUserIDByTelegramID(ctx context.Context, telegramID string) (uuid.UUID, error)
+}
+
+type notesHandlerOption func(*NotesHandler)
+
+// WithPoliticsService устанавливает сервис политик.
+func WithPoliticsService(svc PoliticsService) notesHandlerOption {
+	return func(h *NotesHandler) {
+		h.politicsService = svc
+	}
+}
+
+// WithUserService устанавливает сервис пользователей.
+func WithUserService(svc userService) notesHandlerOption {
+	return func(h *NotesHandler) {
+		h.userSvc = svc
+	}
+}
+
+// NewNotesHandler создает новый хендлер для работы с заметками.
+func NewNotesHandler(opts ...notesHandlerOption) (*NotesHandler, error) {
+	h := &NotesHandler{}
+
+	for _, opt := range opts {
+		opt(h)
+	}
+
+	if h.politicsService == nil {
+		return nil, errors.New("politics service is required")
+	}
+
+	if h.userSvc == nil {
+		return nil, errors.New("user service is required")
+	}
+
+	logrus.Info("created notes handler")
+
+	return h, nil
+}
 
 // FilterNotes фильтрует входящий список айди заметок, возвращая только те, которые доступны пользователю (в соответствии с политиками).
 //
@@ -31,19 +87,12 @@ import (
 //	@Failure		500		{object}	map[string]string	"Внутренняя ошибка сервера"
 //	@Security	BearerAuth
 //	@Router		/auth/notes/filter [post]
-func (s *Handler) FilterNotes(c echo.Context) error {
+func (s *NotesHandler) FilterNotes(c echo.Context) error {
 	var req model.FilterNotesRequest
 
-	body, err := io.ReadAll(c.Request().Body)
-	if err != nil {
-		logrus.WithError(err).Error("error reading body")
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot read body"})
-	}
-
-	err = json.Unmarshal(body, &req)
-	if err != nil {
-		logrus.WithError(err).Error("error unmarshaling body")
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot unmarshal body"})
+	if err := c.Bind(&req); err != nil {
+		logrus.WithError(err).Error("error binding request")
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot bind request"})
 	}
 
 	if len(req.NoteIDs) == 0 {
@@ -62,15 +111,20 @@ func (s *Handler) FilterNotes(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no user in context"})
 	}
 
-	userIDUUID, err := uuid.Parse(userID)
+	userIDUUID, err := s.userSvc.GetUserIDByTelegramID(c.Request().Context(), userID)
 	if err != nil {
-		logrus.WithError(err).Error("error parsing user id")
+		if errors.Is(err, storage.ErrNotFound) {
+			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "user not found"})
+		}
+
+		logrus.WithError(err).Error("error getting user id by telegram id")
+
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 	}
 
 	req.UserID = userIDUUID
 
-	notes, err := s.PoliticsService.FilterNotes(c.Request().Context(), req)
+	notes, err := s.politicsService.FilterNotes(c.Request().Context(), req)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotMember) {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": service.ErrUserNotMember.Error()})

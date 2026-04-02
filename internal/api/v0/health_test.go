@@ -22,13 +22,13 @@ func TestHealth(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	politicsSvc := mocks.NewMockPoliticsService(ctrl)
+	notesHandler := mocks.NewMocknotesProcessorHandler(ctrl)
 
 	handler, err := NewHandler(
 		WithVersion(version),
 		WithBuildDate(buildDate),
 		WithGitCommit(gitCommit),
-		WithPoliticsService(politicsSvc),
+		WithNotesHandler(notesHandler),
 		WithAuthHandler(mocks.NewMockauthProcessorHandler(ctrl)),
 	)
 	require.NoError(t, err)

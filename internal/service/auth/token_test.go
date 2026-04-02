@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:funlen // длинный тест - ничего страшного
+//nolint:funlen,dupl // длинный тест - ничего страшного; похожие тест-кейсы
 func TestCheckToken(t *testing.T) {
 	t.Parallel()
 
@@ -49,10 +49,93 @@ func TestCheckToken(t *testing.T) {
 		},
 	}, []byte("secret"))
 
+	anotherMethodToken, err := jwt.NewWithClaims(jwt.SigningMethodHS384, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}).SignedString([]byte("secret"))
+	require.NoError(t, err)
+
+	unsignedToken, err := jwt.NewWithClaims(jwt.SigningMethodNone, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}).SignedString(jwt.UnsafeAllowNoneSignatureType)
+	require.NoError(t, err)
+
+	noIssuerToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}, []byte("secret"))
+
+	noAudienceToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}, []byte("secret"))
+
+	noExpiredToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:   "test",
+			Subject:  "bot",
+			Audience: []string{internalAPIAudience},
+			IssuedAt: jwt.NewNumericDate(now),
+		},
+	}, []byte("secret"))
+
+	tokenWithoutIat := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			ExpiresAt: jwt.NewNumericDate(now.Add(tokenDuration)),
+		},
+	}, []byte("secret"))
+
 	tests := []test{
 		{
-			name:  "positive case",
+			name:  "positive case (uppercase)",
 			token: "Bearer " + token,
+			want: jwt.MapClaims{
+				"scope": "bot",
+				"iss":   "test",
+				"sub":   "bot",
+				"aud":   []any{internalAPIAudience},
+				"iat":   float64(jwt.NewNumericDate(now).Unix()),
+				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
+			},
+			check: func(err error, tt test, token *jwt.Token) {
+				require.NoError(t, err)
+				require.NotNil(t, token)
+				assert.True(t, token.Valid)
+				assert.Equal(t, "HS256", token.Method.Alg())
+				assert.Equal(t, tt.want, token.Claims)
+			},
+		},
+		{
+			name:  "positive case (lowercase)",
+			token: "bearer " + token,
 			want: jwt.MapClaims{
 				"scope": "bot",
 				"iss":   "test",
@@ -74,7 +157,7 @@ func TestCheckToken(t *testing.T) {
 			token: "Bearer invalid",
 			check: func(err error, tt test, token *jwt.Token) {
 				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token: token is malformed: token contains an invalid number of segments")
+				assert.EqualError(t, err, "invalid token")
 				assert.Nil(t, token)
 			},
 		},
@@ -83,7 +166,7 @@ func TestCheckToken(t *testing.T) {
 			token: "Bearer " + expiredToken,
 			check: func(err error, tt test, token *jwt.Token) {
 				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token: token has invalid claims: token is expired")
+				assert.EqualError(t, err, "invalid token")
 				assert.Nil(t, token)
 			},
 		},
@@ -101,6 +184,69 @@ func TestCheckToken(t *testing.T) {
 			check: func(err error, tt test, token *jwt.Token) {
 				require.Error(t, err)
 				assert.EqualError(t, err, "invalid token: no prefix Bearer")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: empty token",
+			token: "Bearer ",
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token: empty bearer token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: another method token",
+			token: "Bearer " + anotherMethodToken,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: unsigned token",
+			token: "Bearer " + unsignedToken,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: no issuer",
+			token: "Bearer " + noIssuerToken,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: no audience",
+			token: "Bearer " + noAudienceToken,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: no expired",
+			token: "Bearer " + noExpiredToken,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
+				assert.Nil(t, token)
+			},
+		},
+		{
+			name:  "error case: no iat",
+			token: "Bearer " + tokenWithoutIat,
+			check: func(err error, tt test, token *jwt.Token) {
+				require.Error(t, err)
+				assert.EqualError(t, err, "invalid token")
 				assert.Nil(t, token)
 			},
 		},

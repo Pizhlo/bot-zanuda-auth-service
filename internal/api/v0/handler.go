@@ -1,11 +1,8 @@
 package v0
 
 import (
-	"auth-service/internal/model"
-	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
@@ -18,26 +15,22 @@ type Handler struct {
 
 	apiVersion string
 
-	auth authProcessorHandler
-
-	// services
-
-	PoliticsService PoliticsService
+	// handlers
+	auth  authProcessorHandler
+	notes notesProcessorHandler
 }
 
-// PoliticsService - интерфейс для доступа к сервису политик. Отвечает за доступ пользователей к данным.
-//
-//go:generate mockgen -source=handler.go -destination=mocks/politics_svc_mock.go -package=mocks PoliticsService
-type PoliticsService interface {
-	// FilterNotes фильтрует входящие заметки согласно политикам.
-	// Возвращает только заметки, доступные пользователю, с флагом canEdit -
-	// может ли пользователь редактировать заметку.
-	FilterNotes(ctx context.Context, req model.FilterNotesRequest) (map[uuid.UUID]model.NoteAccessInfo, error)
-}
-
+//go:generate mockgen -source=handler.go -destination=mocks/handler_mocks.go -package=mocks authProcessorHandler
 type authProcessorHandler interface {
 	// Login проверяет корректность полученных данных и отправляет в ответ JWT-токен.
 	Login(c echo.Context) error
+}
+
+//go:generate mockgen -source=handler.go -destination=mocks/handler_mocks.go -package=mocks notesProcessorHandler
+type notesProcessorHandler interface {
+	// FilterNotes фильтрует входящие заметки, возвращая только те, которые доступны пользователю
+	// согласно политикам.
+	FilterNotes(c echo.Context) error
 }
 
 type handlerOption func(*Handler)
@@ -63,17 +56,17 @@ func WithGitCommit(gitCommit string) handlerOption {
 	}
 }
 
-// WithPoliticsService устанавливает сервис политик.
-func WithPoliticsService(svc PoliticsService) handlerOption {
-	return func(h *Handler) {
-		h.PoliticsService = svc
-	}
-}
-
 // WithAuthHandler устанавливает хендлер авторизации.
 func WithAuthHandler(auth authProcessorHandler) handlerOption {
 	return func(h *Handler) {
 		h.auth = auth
+	}
+}
+
+// WithNotesHandler устанавливает хендлер работы с заметками.
+func WithNotesHandler(notes notesProcessorHandler) handlerOption {
+	return func(h *Handler) {
+		h.notes = notes
 	}
 }
 
@@ -97,8 +90,8 @@ func NewHandler(opts ...handlerOption) (*Handler, error) {
 		return nil, errors.New("gitCommit is required")
 	}
 
-	if h.PoliticsService == nil {
-		return nil, errors.New("politics service is required")
+	if h.notes == nil {
+		return nil, errors.New("notes handler is required")
 	}
 
 	if h.auth == nil {
@@ -131,4 +124,10 @@ func (h *Handler) Version() string {
 // Login проверяет корректность полученных данных и отправляет в ответ JWT-токен.
 func (h *Handler) Login(c echo.Context) error {
 	return h.auth.Login(c)
+}
+
+// FilterNotes фильтрует входящие заметки, возвращая только те, которые доступны пользователю
+// согласно политикам.
+func (h *Handler) FilterNotes(c echo.Context) error {
+	return h.notes.FilterNotes(c)
 }

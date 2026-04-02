@@ -18,8 +18,92 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+//nolint:dupl,funlen // дублирование, т.к. схожи тест-кейсы для разных хендлеров; длинный тест - это ок
+func TestNewNotesHandler(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		opts      func(t *testing.T, ctrl *gomock.Controller) []notesHandlerOption
+		checkWant func(t *testing.T, notesHandler *NotesHandler)
+		wantErr   require.ErrorAssertionFunc
+	}{
+		{
+			name: "success",
+			opts: func(t *testing.T, ctrl *gomock.Controller) []notesHandlerOption {
+				t.Helper()
+
+				return []notesHandlerOption{
+					WithPoliticsService(mocks.NewMockPoliticsService(ctrl)),
+					WithUserService(mocks.NewMockuserService(ctrl)),
+				}
+			},
+			checkWant: func(t *testing.T, notesHandler *NotesHandler) {
+				t.Helper()
+
+				require.NotNil(t, notesHandler)
+				require.NotNil(t, notesHandler.politicsService)
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "error case: politics service is required",
+			opts: func(t *testing.T, ctrl *gomock.Controller) []notesHandlerOption {
+				t.Helper()
+
+				return []notesHandlerOption{
+					WithUserService(mocks.NewMockuserService(ctrl)),
+				}
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "politics service is required")
+			},
+			checkWant: func(t *testing.T, notesHandler *NotesHandler) {
+				t.Helper()
+
+				require.Nil(t, notesHandler)
+			},
+		},
+		{
+			name: "error case: user service is required",
+			opts: func(t *testing.T, ctrl *gomock.Controller) []notesHandlerOption {
+				t.Helper()
+
+				return []notesHandlerOption{
+					WithPoliticsService(mocks.NewMockPoliticsService(ctrl)),
+				}
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "user service is required")
+			},
+			checkWant: func(t *testing.T, notesHandler *NotesHandler) {
+				t.Helper()
+
+				require.Nil(t, notesHandler)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			opts := tt.opts(t, ctrl)
+			notesHandler, err := NewNotesHandler(opts...)
+			tt.wantErr(t, err)
+
+			tt.checkWant(t, notesHandler)
+		})
+	}
+}
+
 //nolint:funlen // длинный тест
-func TestHandler_FilterNotes(t *testing.T) {
+func TestNotesHandler_FilterNotes(t *testing.T) {
 	t.Parallel()
 
 	type wantResponse struct {
@@ -29,6 +113,7 @@ func TestHandler_FilterNotes(t *testing.T) {
 	}
 
 	spaceID := uuid.New()
+	tgID := "1234567890"
 	userID := uuid.New()
 
 	note1 := uuid.New()
@@ -40,7 +125,7 @@ func TestHandler_FilterNotes(t *testing.T) {
 		name         string
 		body         any
 		userID       string
-		prepareMocks func(ps *mocks.MockPoliticsService)
+		prepareMocks func(m *mocks.MockPoliticsService, u *mocks.MockuserService)
 		checkWant    func(actual wantResponse)
 	}{
 		{
@@ -49,9 +134,15 @@ func TestHandler_FilterNotes(t *testing.T) {
 				SpaceID: spaceID,
 				NoteIDs: noteIDs,
 			},
-			userID: userID.String(),
-			prepareMocks: func(ps *mocks.MockPoliticsService) {
-				ps.EXPECT().
+			userID: tgID,
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+
+				u.EXPECT().
+					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
+					Return(userID, nil)
+
+				m.EXPECT().
 					FilterNotes(gomock.Any(), gomock.Any()).
 					Return(map[uuid.UUID]model.NoteAccessInfo{
 						note1: {CanRead: true, CanEdit: true},
@@ -75,7 +166,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 				SpaceID: spaceID,
 				NoteIDs: []uuid.UUID{},
 			},
-			userID: userID.String(),
+			userID: tgID,
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+			},
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusBadRequest, actual.status)
 				assert.Equal(t, "empty note id list", actual.errMsg)
@@ -87,7 +181,10 @@ func TestHandler_FilterNotes(t *testing.T) {
 				SpaceID: uuid.UUID{},
 				NoteIDs: noteIDs,
 			},
-			userID: userID.String(),
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+			},
+			userID: tgID,
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusBadRequest, actual.status)
 				assert.Equal(t, "empty space id", actual.errMsg)
@@ -100,6 +197,9 @@ func TestHandler_FilterNotes(t *testing.T) {
 				NoteIDs: noteIDs,
 			},
 			userID: "",
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+			},
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusUnauthorized, actual.status)
 				assert.Equal(t, "no user in context", actual.errMsg)
@@ -111,9 +211,15 @@ func TestHandler_FilterNotes(t *testing.T) {
 				SpaceID: spaceID,
 				NoteIDs: noteIDs,
 			},
-			userID: userID.String(),
-			prepareMocks: func(ps *mocks.MockPoliticsService) {
-				ps.EXPECT().
+			userID: tgID,
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+
+				u.EXPECT().
+					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
+					Return(userID, nil)
+
+				m.EXPECT().
 					FilterNotes(gomock.Any(), gomock.Any()).
 					Return(nil, service.ErrUserNotMember)
 			},
@@ -128,11 +234,17 @@ func TestHandler_FilterNotes(t *testing.T) {
 				SpaceID: spaceID,
 				NoteIDs: noteIDs,
 			},
-			userID: userID.String(),
-			prepareMocks: func(ps *mocks.MockPoliticsService) {
-				ps.EXPECT().
+			userID: tgID,
+			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
+				t.Helper()
+
+				u.EXPECT().
+					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
+					Return(userID, nil)
+
+				m.EXPECT().
 					FilterNotes(gomock.Any(), gomock.Any()).
-					Return(nil, errors.New("db error"))
+					Return(nil, errors.New("service error"))
 			},
 			checkWant: func(actual wantResponse) {
 				assert.Equal(t, http.StatusInternalServerError, actual.status)
@@ -149,18 +261,13 @@ func TestHandler_FilterNotes(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			politicsSvc := mocks.NewMockPoliticsService(ctrl)
+			politicsService := mocks.NewMockPoliticsService(ctrl)
+			userService := mocks.NewMockuserService(ctrl)
+			tt.prepareMocks(politicsService, userService)
 
-			if tt.prepareMocks != nil {
-				tt.prepareMocks(politicsSvc)
-			}
-
-			h, err := NewHandler(
-				WithVersion("1.0.0"),
-				WithBuildDate("2021-01-01"),
-				WithGitCommit("1234567890"),
-				WithPoliticsService(politicsSvc),
-				WithAuthHandler(mocks.NewMockauthProcessorHandler(ctrl)),
+			notesHandler, err := NewNotesHandler(
+				WithPoliticsService(politicsService),
+				WithUserService(userService),
 			)
 			require.NoError(t, err)
 
@@ -179,7 +286,7 @@ func TestHandler_FilterNotes(t *testing.T) {
 			rec := httptest.NewRecorder()
 			c := e.NewContext(req, rec)
 
-			err = h.FilterNotes(c)
+			err = notesHandler.FilterNotes(c)
 			require.NoError(t, err)
 
 			body := rec.Body.Bytes()

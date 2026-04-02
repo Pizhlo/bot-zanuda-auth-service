@@ -51,6 +51,7 @@ func TestLoadConfig(t *testing.T) {
 					UpdateKeyInterval: 1 * time.Hour,
 					Issuer:            "test",
 					TokenDuration:     1 * time.Hour,
+					UserCacheTTL:      1 * time.Hour,
 				},
 				Policy: Policy{
 					Config: "casbin_model.conf",

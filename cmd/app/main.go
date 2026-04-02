@@ -11,6 +11,7 @@ import (
 	"auth-service/internal/service/politics/access"
 	"auth-service/internal/service/politics/permissions"
 	"auth-service/internal/service/redis"
+	"auth-service/internal/service/user"
 	repo "auth-service/internal/storage/postgres"
 	"auth-service/internal/storage/vault"
 	"context"
@@ -93,18 +94,21 @@ func main() {
 
 	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
 
-	authHandler := initAuthHandler(authSvc)
+	redis := initRedisStorage(ctx, config.Redis)
+	defer butler.stop(ctx, redis)
 
-	handlerV0 := initHandlerV0(butler.BuildInfo, politicsSvc, authHandler)
+	userSvc := initUserService(repo, redis, config.Auth)
+
+	authHandler := initAuthHandler(authSvc)
+	notesHandler := initNotesHandler(politicsSvc, userSvc)
+	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler)
 	middlewareHandler := initMiddlewareHandler(authSvc)
+
 	server := initServer(handlerV0, middlewareHandler, config.Server)
 
 	go butler.start(func() error {
 		return server.Start(notifyCtx)
 	})
-
-	redis := initRedisStorage(ctx, config.Redis)
-	defer butler.stop(ctx, redis)
 
 	enf := initEnforcer(config)
 
@@ -131,6 +135,12 @@ func initEnforcer(cfg *config.Config) *enforcer.Enforcer {
 	dsn := formatPostgresAddr(cfg.Postgres)
 
 	return start(enforcer.NewEnforcer(enforcer.WithDsn(dsn), enforcer.WithModelConf(cfg.Policy.Config)))
+}
+
+func initUserService(storage *repo.Repo, cache *redis.Service, cfg config.Auth) *user.Service {
+	logrus.Info("initializing user service")
+
+	return start(user.New(user.WithStorage(storage), user.WithCache(cache), user.WithCacheTTL(cfg.UserCacheTTL)))
 }
 
 func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
@@ -192,7 +202,18 @@ func initAuthHandler(authSrv *auth.Service) *handlerV0.AuthHandler {
 	)
 }
 
-func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService, auth *handlerV0.AuthHandler) *handlerV0.Handler {
+func initNotesHandler(politicsSvc *politics.Service, userSvc *user.Service) *handlerV0.NotesHandler {
+	logrus.Info("initializing notes handler")
+
+	return start(
+		handlerV0.NewNotesHandler(
+			handlerV0.WithPoliticsService(politicsSvc),
+			handlerV0.WithUserService(userSvc),
+		),
+	)
+}
+
+func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *handlerV0.AuthHandler) *handlerV0.Handler {
 	logrus.WithFields(logrus.Fields{
 		"version":   buildInfo.Version,
 		"buildDate": buildInfo.BuildDate,
@@ -204,7 +225,7 @@ func initHandlerV0(buildInfo *BuildInfo, politics handlerV0.PoliticsService, aut
 			handlerV0.WithVersion(buildInfo.Version),
 			handlerV0.WithBuildDate(buildInfo.BuildDate),
 			handlerV0.WithGitCommit(buildInfo.GitCommit),
-			handlerV0.WithPoliticsService(politics),
+			handlerV0.WithNotesHandler(notes),
 			handlerV0.WithAuthHandler(auth),
 		),
 	)
