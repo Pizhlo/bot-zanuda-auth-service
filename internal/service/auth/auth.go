@@ -2,6 +2,9 @@ package auth
 
 import (
 	"auth-service/internal/model"
+	"auth-service/internal/service/internal"
+	db "auth-service/internal/storage"
+	"auth-service/pkg/audit"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -17,6 +20,8 @@ var (
 	ErrInactiveClient = errors.New("client is inactive")
 	// ErrInvalidSecret возвращается, если секрет клиента не совпадает с хранимым в Vault.
 	ErrInvalidSecret = errors.New("invalid client secret")
+	// ErrClientSecretNotFound возвращается, если секрет клиента не найден в Vault.
+	ErrClientSecretNotFound = errors.New("client secret not found in vault")
 	// ErrInvalidScope возвращается, если scope не соответствует разрешенным scopes из БД.
 	ErrInvalidScope = errors.New("invalid scope")
 	// ErrInvalidGrantType возвращается, если grant type неверный.
@@ -25,6 +30,7 @@ var (
 
 const (
 	internalAPIAudience = "zanuda-internal-api"
+	serviceName         = "auth-service"
 )
 
 // Login проверяет grant type и вызывает соответствующую функцию.
@@ -36,42 +42,95 @@ func (s *Service) Login(ctx context.Context, req model.LoginRequest) (model.Logi
 	case model.ClientCredentialsGrantType:
 		return s.loginWithClientCredentials(ctx, req)
 	default:
+		operationLogin := fmt.Sprintf("%s.%s", serviceName, "login")
+
+		ctx = internal.WithOperation(ctx, operationLogin)
+
+		event := s.auditor.Create(fillCtx(ctx))
+		defer internal.WithPanicRecovery(ctx, event)()
+
+		event.WithError(audit.ErrCodeInvalidGrantType, audit.KindValidation, ErrInvalidGrantType)
+		event.Append(audit.Level(audit.ErrLevelWarn))
+
 		return model.LoginResponse{}, ErrInvalidGrantType
 	}
 }
 
+const (
+	messageServiceNotFound     = "unknown service client. Service client not found (invalid client_id?)"
+	messageInactiveClient      = "client is inactive"
+	messageInvalidSecret       = "invalid client secret"
+	messageVaultSecretNotFound = "vault secret not found"
+)
+
+//nolint:funlen // много проверок аудита.
 func (s *Service) loginWithClientCredentials(ctx context.Context, req model.LoginRequest) (model.LoginResponse, error) {
-	client, err := s.storage.GetServiceClient(ctx, req.ClientID)
+	operationLoginWithClientCredentials := fmt.Sprintf("%s.%s", serviceName, "loginWithClientCredentials")
+
+	ctx = internal.WithOperation(ctx, operationLoginWithClientCredentials)
+
+	event := s.auditor.Create(fillCtx(ctx))
+	defer internal.WithPanicRecovery(ctx, event)()
+
+	client, err := s.validateClient(ctx, req.ClientID)
 	if err != nil {
+		if errors.Is(err, ErrInactiveClient) {
+			event.Append(audit.Message(messageInactiveClient))
+			event.WithError(audit.ErrCodeInactiveClient, audit.KindDomain, ErrInactiveClient)
+			event.Append(audit.Level(audit.ErrLevelError))
+
+			return model.LoginResponse{}, ErrInactiveClient
+		}
+
+		if errors.Is(err, db.ErrNotFound) {
+			event.Append(audit.Message(messageServiceNotFound))
+			event.WithError(audit.ErrCodeServiceNotFound, audit.KindDomain, err)
+			event.Append(audit.Level(audit.ErrLevelError))
+
+			return model.LoginResponse{}, err
+		}
+
+		event.WithError(audit.ErrCodeServiceNotFound, audit.KindInfra, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
 		return model.LoginResponse{}, err
 	}
 
-	if !client.IsActive {
-		return model.LoginResponse{}, ErrInactiveClient
-	}
-
-	clientSecret, err := s.vaultClient.GetClientSecret(req.ClientID)
+	err = s.validateSecret(req.ClientID, req.ClientSecret)
 	if err != nil {
-		return model.LoginResponse{}, fmt.Errorf("error getting client secret: %w", err)
-	}
+		if errors.Is(err, ErrInvalidSecret) {
+			event.Append(audit.Message(messageInvalidSecret))
+			event.WithError(audit.ErrCodeInvalidSecret, audit.KindDomain, ErrInvalidSecret)
+			event.Append(audit.Level(audit.ErrLevelWarn))
 
-	if clientSecret == "" {
-		return model.LoginResponse{}, ErrInvalidSecret
-	}
-
-	if subtle.ConstantTimeCompare([]byte(req.ClientSecret), []byte(clientSecret)) != 1 {
-		return model.LoginResponse{}, ErrInvalidSecret
-	}
-
-	var scope []string
-	if req.Scope == "" { // если scope не передан, используем все scopes из БД
-		scope = client.Scopes
-	} else {
-		// если scope передан, проверяем, что каждый scope содержится в БД (client.Scopes)
-		scope, err = validateScopes(client.Scopes, string(req.Scope))
-		if err != nil {
-			return model.LoginResponse{}, ErrInvalidScope
+			return model.LoginResponse{}, ErrInvalidSecret
 		}
+
+		if errors.Is(err, ErrClientSecretNotFound) {
+			event.Append(audit.Message(messageVaultSecretNotFound))
+			event.WithError(audit.ErrCodeVaultSecretNotFound, audit.KindInfra, ErrClientSecretNotFound)
+			event.Append(audit.Level(audit.ErrLevelError))
+
+			return model.LoginResponse{}, ErrInvalidSecret
+		}
+
+		errCode := audit.ErrCodeVaultSecretNotFound
+		if !errors.Is(err, db.ErrNotFound) {
+			errCode = audit.ErrCodeServiceUnavailable
+		}
+
+		event.WithError(errCode, audit.KindInfra, err)
+		event.Append(audit.Message(messageVaultSecretNotFound))
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		return model.LoginResponse{}, err
+	}
+
+	scope, err := s.validateAndGetScopes(client.Scopes, string(req.Scope))
+	if err != nil {
+		event.WithError(audit.ErrCodeInvalidScope, audit.KindValidation, ErrInvalidScope)
+
+		return model.LoginResponse{}, ErrInvalidScope
 	}
 
 	now := time.Now()
@@ -87,7 +146,10 @@ func (s *Service) loginWithClientCredentials(ctx context.Context, req model.Logi
 		},
 	})
 	if err != nil {
-		return model.LoginResponse{}, fmt.Errorf("error generating token: %w", err)
+		event.WithError(audit.ErrCodeTokenGenerationFailed, audit.KindInfra, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		return model.LoginResponse{}, err
 	}
 
 	return model.LoginResponse{
@@ -96,6 +158,60 @@ func (s *Service) loginWithClientCredentials(ctx context.Context, req model.Logi
 		ExpiresIn:   int(s.tokenDuration.Seconds()),
 		Scope:       model.Scope(strings.Join(scope, " ")),
 	}, nil
+}
+
+// validateClient проверяет существование и активность клиента.
+func (s *Service) validateClient(ctx context.Context, clientID string) (*model.ServiceClient, error) {
+	client, err := s.storage.GetServiceClient(ctx, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	if !client.IsActive {
+		return nil, ErrInactiveClient
+	}
+
+	return &client, nil
+}
+
+// validateSecret проверяет секрет из Vault.
+func (s *Service) validateSecret(clientID string, clientSecret string) error {
+	vaultSecret, err := s.vaultClient.GetClientSecret(clientID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return ErrClientSecretNotFound
+		}
+
+		return err
+	}
+
+	if vaultSecret == "" {
+		return ErrClientSecretNotFound
+	}
+
+	if subtle.ConstantTimeCompare([]byte(clientSecret), []byte(vaultSecret)) != 1 {
+		return ErrInvalidSecret
+	}
+
+	return nil
+}
+
+// validateAndGetScopes возвращает валидные scopes.
+func (s *Service) validateAndGetScopes(clientScopes []string, reqScope string) ([]string, error) {
+	var scope []string
+
+	if reqScope == "" {
+		scope = clientScopes
+	} else {
+		var err error
+
+		scope, err = validateScopes(clientScopes, reqScope)
+		if err != nil {
+			return nil, ErrInvalidScope
+		}
+	}
+
+	return scope, nil
 }
 
 func validateScopes(allowed []string, requestedStr string) ([]string, error) {

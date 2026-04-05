@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"auth-service/internal/storage"
 	"fmt"
 	"strings"
 
@@ -38,7 +39,7 @@ func (c *Client) GetClientSecret(clientID string) (string, error) {
 			logrus.WithField("warnings", strings.Join(warnings, ", ")).Warning("warnings while getting client secret")
 		}
 
-		return "", fmt.Errorf("key %q not found or not string", "api_key")
+		return "", storage.ErrNotFound
 	}
 
 	return v, nil

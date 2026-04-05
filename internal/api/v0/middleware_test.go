@@ -3,11 +3,15 @@ package v0
 import (
 	"auth-service/internal/api/v0/mocks"
 	"auth-service/internal/model"
+	"auth-service/pkg/audit"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/golang/mock/gomock"
@@ -141,4 +145,67 @@ func TestVerifyPayload(t *testing.T) {
 			tt.wantErr(t, err)
 		})
 	}
+}
+
+func TestConnectionHook(t *testing.T) {
+	t.Parallel()
+
+	t.Run("adds all connection fields to stash", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := context.Background()
+		ctx = withTraceID(ctx, "trace-1")
+		ctx = withRequestID(ctx, "req-1")
+		ctx = withIPAddress(ctx, "127.0.0.1")
+		ctx = withUserAgent(ctx, "curl/8.0")
+		ctx = withUserID(ctx, "42")
+
+		stash := ConnectionHook(ctx, audit.Stash{})
+		values := stashFieldsByName(stash)
+
+		require.Equal(t, "trace-1", values["TraceID"])
+		require.Equal(t, "req-1", values["RequestID"])
+		require.Equal(t, audit.EventContext{
+			"ip_address": "127.0.0.1",
+			"user_agent": "curl/8.0",
+			"user_id":    "42",
+		}, values["Context"])
+	})
+
+	t.Run("adds empty context when values are missing", func(t *testing.T) {
+		t.Parallel()
+
+		stash := ConnectionHook(context.Background(), audit.Stash{})
+		values := stashFieldsByName(stash)
+
+		require.Empty(t, values["Context"])
+	})
+}
+
+func stashFieldsByName(stash audit.Stash) map[string]any {
+	v := reflect.ValueOf(&stash).Elem()
+
+	fields := v.FieldByName("fields")
+	if !fields.IsValid() || fields.IsNil() {
+		return map[string]any{}
+	}
+
+	fields = reflect.NewAt(fields.Type(), unsafe.Pointer(fields.UnsafeAddr())).Elem()
+
+	result := make(map[string]any, fields.Len())
+
+	iter := fields.MapRange()
+	for iter.Next() {
+		key := iter.Key().Interface()
+		keyName := fmt.Sprint(key)
+
+		fieldIface := iter.Value().Interface()
+
+		valueField := reflect.ValueOf(fieldIface).FieldByName("Value")
+		if valueField.IsValid() && valueField.CanInterface() {
+			result[keyName] = valueField.Interface()
+		}
+	}
+
+	return result
 }

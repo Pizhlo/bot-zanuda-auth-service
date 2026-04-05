@@ -14,6 +14,7 @@ import (
 	"auth-service/internal/service/user"
 	repo "auth-service/internal/storage/postgres"
 	"auth-service/internal/storage/vault"
+	"auth-service/pkg/audit"
 	"context"
 	"flag"
 	"fmt"
@@ -87,17 +88,19 @@ func main() {
 
 	defer butler.stop(ctx, repo)
 
-	authSvc := initAuthService(vaultClient, config.Auth, repo)
+	auditor := initAuditor()
+
+	authSvc := initAuthService(vaultClient, config.Auth, repo, auditor)
 
 	spaceAccessChecker := initSpaceAccessChecker(repo)
 	notePermissionResolver := initNotePermissionResolver(repo)
 
-	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
+	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker, auditor)
 
 	redis := initRedisStorage(ctx, config.Redis)
 	defer butler.stop(ctx, redis)
 
-	userSvc := initUserService(repo, redis, config.Auth)
+	userSvc := initUserService(repo, redis, config.Auth, auditor)
 
 	authHandler := initAuthHandler(authSvc)
 	notesHandler := initNotesHandler(politicsSvc, userSvc)
@@ -137,10 +140,21 @@ func initEnforcer(cfg *config.Config) *enforcer.Enforcer {
 	return start(enforcer.NewEnforcer(enforcer.WithDsn(dsn), enforcer.WithModelConf(cfg.Policy.Config)))
 }
 
-func initUserService(storage *repo.Repo, cache *redis.Service, cfg config.Auth) *user.Service {
+func initAuditor() *audit.Auditor {
+	logrus.Info("initializing error event builder")
+
+	return audit.NewAuditor(
+		audit.WithHook(auth.TokenValidationFailedHook),
+		audit.WithHook(handlerV0.ConnectionHook),
+		audit.WithHook(politics.FilterNotesFailedHook),
+		audit.WithHook(user.GetUserIDByTelegramIDHook),
+	)
+}
+
+func initUserService(storage *repo.Repo, cache *redis.Service, cfg config.Auth, auditor *audit.Auditor) *user.Service {
 	logrus.Info("initializing user service")
 
-	return start(user.New(user.WithStorage(storage), user.WithCache(cache), user.WithCacheTTL(cfg.UserCacheTTL)))
+	return start(user.New(user.WithStorage(storage), user.WithCache(cache), user.WithCacheTTL(cfg.UserCacheTTL), user.WithAuditor(auditor)))
 }
 
 func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
@@ -161,7 +175,7 @@ func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
 	))
 }
 
-func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissionResolver, spaceChecker *access.SpaceAccessChecker) *politics.Service {
+func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissionResolver, spaceChecker *access.SpaceAccessChecker, auditor *audit.Auditor) *politics.Service {
 	logrus.Info("initializing politics service")
 
 	return start(
@@ -169,11 +183,12 @@ func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissio
 			politics.WithStorage(storage),
 			politics.WithNotePermissionResolver(resolver),
 			politics.WithSpaceAccessChecker(spaceChecker),
+			politics.WithAuditor(auditor),
 		),
 	)
 }
 
-func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.Repo) *auth.Service {
+func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.Repo, auditor *audit.Auditor) *auth.Service {
 	logrus.WithFields(logrus.Fields{
 		"update_key_interval": cfg.UpdateKeyInterval,
 		"issuer":              cfg.Issuer,
@@ -188,6 +203,7 @@ func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.R
 			auth.WithTokenDuration(cfg.TokenDuration),
 			auth.WithVaultClient(vaultClient),
 			auth.WithStorage(storage),
+			auth.WithAuditor(auditor),
 		),
 	)
 }

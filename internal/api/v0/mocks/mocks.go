@@ -37,18 +37,18 @@ func (m *MockAuthService) EXPECT() *MockAuthServiceMockRecorder {
 }
 
 // CheckToken mocks base method.
-func (m *MockAuthService) CheckToken(authHeader string) (*jwt.Token, error) {
+func (m *MockAuthService) CheckToken(ctx context.Context, authHeader string) (*jwt.Token, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckToken", authHeader)
+	ret := m.ctrl.Call(m, "CheckToken", ctx, authHeader)
 	ret0, _ := ret[0].(*jwt.Token)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CheckToken indicates an expected call of CheckToken.
-func (mr *MockAuthServiceMockRecorder) CheckToken(authHeader interface{}) *gomock.Call {
+func (mr *MockAuthServiceMockRecorder) CheckToken(ctx, authHeader interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockAuthService)(nil).CheckToken), authHeader)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockAuthService)(nil).CheckToken), ctx, authHeader)
 }
 
 // GetIssuer mocks base method.

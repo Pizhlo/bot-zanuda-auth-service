@@ -2,6 +2,7 @@ package auth
 
 import (
 	"auth-service/internal/model"
+	"auth-service/pkg/audit"
 	"context"
 	"errors"
 	"time"
@@ -16,6 +17,14 @@ type Service struct {
 	tokenDuration     time.Duration
 	storage           storage
 	issuer            string
+	auditor           auditor
+}
+
+// auditor - интерфейс для доступа к auditor.
+//
+//go:generate mockgen -source=service.go -destination=mocks/mocks.go -package=mocks auditor
+type auditor interface {
+	Create(ctx context.Context) audit.Event
 }
 
 // vaultClient - интерфейс для доступа к vault.
@@ -73,6 +82,13 @@ func WithStorage(storage storage) option {
 	}
 }
 
+// WithAuditor устанавливает auditor для событий ошибок.
+func WithAuditor(builder auditor) option {
+	return func(s *Service) {
+		s.auditor = builder
+	}
+}
+
 // New создает новый сервис для работы с авторизацией.
 func New(opts ...option) (*Service, error) {
 	s := &Service{}
@@ -103,6 +119,10 @@ func New(opts ...option) (*Service, error) {
 
 	if s.tokenDuration <= 0 {
 		return nil, errors.New("token duration must be greater than 0")
+	}
+
+	if s.auditor == nil {
+		return nil, errors.New("auditor is required")
 	}
 
 	return s, nil

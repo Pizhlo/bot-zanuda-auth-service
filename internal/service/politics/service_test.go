@@ -2,6 +2,7 @@ package politics
 
 import (
 	"auth-service/internal/service/politics/mocks"
+	"auth-service/pkg/audit/testaudit"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -13,9 +14,10 @@ type testMocks struct {
 	storage      *mocks.Mockstorage
 	spaceChecker *mocks.MockspaceAccessChecker
 	noteResolver *mocks.MocknotePermissionResolver
+	auditor      auditor
 }
 
-//nolint:funlen // длинный тест
+//nolint:funlen, dupl // длинный тест - это ок, похожие тест-кейсы
 func TestNew(t *testing.T) {
 	t.Parallel()
 
@@ -35,6 +37,7 @@ func TestNew(t *testing.T) {
 					WithStorage(m.storage),
 					WithSpaceAccessChecker(m.spaceChecker),
 					WithNotePermissionResolver(m.noteResolver),
+					WithAuditor(m.auditor),
 				}
 			},
 			createWant: func(t *testing.T, m *testMocks) *Service {
@@ -44,6 +47,7 @@ func TestNew(t *testing.T) {
 					storage:                m.storage,
 					spaceAccessChecker:     m.spaceChecker,
 					notePermissionResolver: m.noteResolver,
+					auditor:                m.auditor,
 				}
 			},
 			wantErr: require.NoError,
@@ -102,6 +106,7 @@ func TestNew(t *testing.T) {
 				return []option{
 					WithStorage(m.storage),
 					WithSpaceAccessChecker(m.spaceChecker),
+					WithAuditor(m.auditor),
 				}
 			},
 			createWant: func(t *testing.T, m *testMocks) *Service {
@@ -112,6 +117,30 @@ func TestNew(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, _ ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "note permission resolver is required")
+			},
+			check: func(svc *Service, want *Service) {
+				require.Nil(t, svc)
+			},
+		},
+		{
+			name: "error case: auditor is required",
+			createOpts: func(t *testing.T, m *testMocks) []option {
+				t.Helper()
+
+				return []option{
+					WithStorage(m.storage),
+					WithSpaceAccessChecker(m.spaceChecker),
+					WithNotePermissionResolver(m.noteResolver),
+				}
+			},
+			createWant: func(t *testing.T, m *testMocks) *Service {
+				t.Helper()
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, _ ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "auditor is required")
 			},
 			check: func(svc *Service, want *Service) {
 				require.Nil(t, svc)
@@ -131,6 +160,7 @@ func TestNew(t *testing.T) {
 				storage:      mocks.NewMockstorage(ctrl),
 				spaceChecker: mocks.NewMockspaceAccessChecker(ctrl),
 				noteResolver: mocks.NewMocknotePermissionResolver(ctrl),
+				auditor:      testaudit.NewAuditor(t),
 			}
 
 			svc, err := New(tt.createOpts(t, m)...)

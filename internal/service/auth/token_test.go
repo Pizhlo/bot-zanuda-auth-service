@@ -2,8 +2,14 @@ package auth
 
 import (
 	"auth-service/internal/service/auth/mocks"
+	serviceinternal "auth-service/internal/service/internal"
+	"auth-service/pkg/audit"
+	"auth-service/pkg/audit/testaudit"
+	"context"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/golang/mock/gomock"
@@ -257,7 +263,7 @@ func TestCheckToken(t *testing.T) {
 			t.Parallel()
 
 			auth := createTestAuthService(t, []byte("secret"), nil)
-			token, err := auth.CheckToken(tt.token)
+			token, err := auth.CheckToken(t.Context(), tt.token)
 			tt.check(err, tt, token)
 		})
 	}
@@ -353,7 +359,266 @@ func TestGenerateToken(t *testing.T) {
 	require.NotEmpty(t, claims["exp"])
 }
 
-func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *testing.T, mockVaultClient *mocks.MockvaultClient, mockStorage *mocks.Mockstorage)) *Service {
+//nolint:funlen // длинный тест - ничего страшного
+func TestParseToken(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	validToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}, []byte("secret"))
+
+	invalidIssuerToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "another-issuer",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}, []byte("secret"))
+
+	noAudienceToken := generateTestToken(t, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}, []byte("secret"))
+
+	anotherMethodToken, err := jwt.NewWithClaims(jwt.SigningMethodHS384, tokenClaims{
+		Scope: "bot",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test",
+			Subject:   "bot",
+			Audience:  []string{internalAPIAudience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
+		},
+	}).SignedString([]byte("secret"))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		tokenString string
+		wantErr     require.ErrorAssertionFunc
+		check       func(t *testing.T, token *jwt.Token, claims jwt.MapClaims)
+	}{
+		{
+			name:        "valid token",
+			tokenString: validToken,
+			wantErr:     require.NoError,
+			check: func(t *testing.T, token *jwt.Token, claims jwt.MapClaims) {
+				t.Helper()
+				require.NotNil(t, token)
+				require.True(t, token.Valid)
+				require.Equal(t, "bot", claims["scope"])
+			},
+		},
+		{
+			name:        "invalid issuer",
+			tokenString: invalidIssuerToken,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "token has invalid claims")
+			},
+			check: func(t *testing.T, token *jwt.Token, claims jwt.MapClaims) {
+				t.Helper()
+				require.Nil(t, token)
+				require.Empty(t, claims)
+			},
+		},
+		{
+			name:        "missing audience",
+			tokenString: noAudienceToken,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "token has invalid claims")
+			},
+			check: func(t *testing.T, token *jwt.Token, claims jwt.MapClaims) {
+				t.Helper()
+				require.Nil(t, token)
+				require.Empty(t, claims)
+			},
+		},
+		{
+			name:        "invalid signing method",
+			tokenString: anotherMethodToken,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "token signature is invalid")
+			},
+			check: func(t *testing.T, token *jwt.Token, claims jwt.MapClaims) {
+				t.Helper()
+				require.Nil(t, token)
+				require.Empty(t, claims)
+			},
+		},
+		{
+			name:        "malformed token",
+			tokenString: "malformed.token",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "token is malformed")
+			},
+			check: func(t *testing.T, token *jwt.Token, claims jwt.MapClaims) {
+				t.Helper()
+				require.Nil(t, token)
+				require.Empty(t, claims)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			svc := createTestAuthService(t, []byte("secret"), nil)
+			token, claims, err := svc.parseToken(tt.tokenString)
+
+			tt.wantErr(t, err)
+			tt.check(t, token, claims)
+		})
+	}
+}
+
+func TestValidateIAT(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		claims  jwt.MapClaims
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name: "valid iat",
+			claims: jwt.MapClaims{
+				"iat": float64(time.Now().Unix()),
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name:   "missing iat",
+			claims: jwt.MapClaims{},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorIs(t, err, ErrInvalidToken)
+			},
+		},
+		{
+			name: "invalid iat type",
+			claims: jwt.MapClaims{
+				"iat": "not-a-number",
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorIs(t, err, ErrInvalidToken)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			event := testaudit.NewAuditor(t).Create(t.Context())
+
+			err := validateIAT(tt.claims, event)
+			tt.wantErr(t, err)
+		})
+	}
+}
+
+func TestTokenValidationFailedHook(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ctx = serviceinternal.WithServiceName(ctx)
+	ctx = serviceinternal.WithMessage(ctx, "failed to validate token")
+	ctx = serviceinternal.WithLevel(ctx, audit.ErrLevelWarn)
+	ctx = serviceinternal.WithErrorCode(ctx, audit.ErrCodeTokenInvalid)
+	ctx = serviceinternal.WithMessageCtx(ctx, audit.EventContext{"ip_address": "127.0.0.1"})
+	ctx = serviceinternal.WithUserID(ctx, "user-1")
+	ctx = serviceinternal.WithOperation(ctx, "auth-service.check_token")
+	ctx = serviceinternal.WithKind(ctx, audit.KindValidation)
+
+	var captured audit.Stash
+
+	auditor := audit.NewAuditor(
+		audit.WithHook(TokenValidationFailedHook),
+		audit.WithHook(func(ctx context.Context, stash audit.Stash) audit.Stash {
+			captured = stash
+			return stash
+		}),
+	)
+
+	_ = auditor.Create(ctx)
+	values := stashValues(captured)
+
+	require.Contains(t, values, "auth-service")
+	require.Contains(t, values, "failed to validate token")
+	require.Contains(t, values, audit.ErrLevelWarn)
+	require.Contains(t, values, audit.ErrCodeTokenInvalid)
+	require.Contains(t, values, "user-1")
+	require.Contains(t, values, "auth-service.check_token")
+	require.Contains(t, values, audit.KindValidation)
+	require.True(t, containsByDeepEqual(values, audit.EventContext{"ip_address": "127.0.0.1"}))
+}
+
+func stashValues(stash audit.Stash) []any {
+	v := reflect.ValueOf(&stash).Elem()
+
+	fields := v.FieldByName("fields")
+	if !fields.IsValid() || fields.IsNil() {
+		return nil
+	}
+
+	// Поле неэкспортируемое, поэтому читаем его через unsafe для теста.
+	fields = reflect.NewAt(fields.Type(), unsafe.Pointer(fields.UnsafeAddr())).Elem()
+
+	values := make([]any, 0, fields.Len())
+
+	iter := fields.MapRange()
+	for iter.Next() {
+		fieldValue := iter.Value()
+		fieldIface := fieldValue.Interface()
+
+		valueField := reflect.ValueOf(fieldIface).FieldByName("Value")
+		if valueField.IsValid() && valueField.CanInterface() {
+			values = append(values, valueField.Interface())
+		}
+	}
+
+	return values
+}
+
+func containsByDeepEqual(values []any, want any) bool {
+	for _, v := range values {
+		if reflect.DeepEqual(v, want) {
+			return true
+		}
+	}
+
+	return false
+}
+
+type mockMocks struct {
+	mockVaultClient *mocks.MockvaultClient
+	mockStorage     *mocks.Mockstorage
+	mockAuditor     auditor
+}
+
+func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *testing.T, m *mockMocks)) *Service {
 	t.Helper()
 
 	updateKey := 1 * time.Minute
@@ -362,12 +627,27 @@ func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *te
 
 	mockVaultClient := mocks.NewMockvaultClient(ctrl)
 	mockStorage := mocks.NewMockstorage(ctrl)
+	mockAuditor := testaudit.NewAuditor(t)
 
-	if setupMocks != nil {
-		setupMocks(t, mockVaultClient, mockStorage)
+	m := &mockMocks{
+		mockVaultClient: mockVaultClient,
+		mockStorage:     mockStorage,
+		mockAuditor:     mockAuditor,
 	}
 
-	auth, err := New(WithSecretKey(secretKey), WithUpdateKeyInterval(updateKey), WithVaultClient(mockVaultClient), WithStorage(mockStorage), WithIssuer("test"), WithTokenDuration(time.Second))
+	if setupMocks != nil {
+		setupMocks(t, m)
+	}
+
+	auth, err := New(
+		WithSecretKey(secretKey),
+		WithUpdateKeyInterval(updateKey),
+		WithVaultClient(mockVaultClient),
+		WithStorage(mockStorage),
+		WithIssuer("test"),
+		WithTokenDuration(time.Second),
+		WithAuditor(mockAuditor),
+	)
 	require.NoError(t, err)
 
 	return auth
