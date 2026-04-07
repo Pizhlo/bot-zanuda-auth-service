@@ -3,8 +3,15 @@ package politics
 import (
 	"auth-service/internal/model"
 	"auth-service/internal/service"
+	serviceinternal "auth-service/internal/service/internal"
 	"auth-service/internal/service/politics/mocks"
+	"auth-service/pkg/audit"
+	"auth-service/pkg/audit/testaudit"
+	"context"
+	"fmt"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
@@ -133,6 +140,7 @@ func TestFilterNotes(t *testing.T) {
 				storage:                m.storage,
 				spaceAccessChecker:     m.spaceChecker,
 				notePermissionResolver: m.noteResolver,
+				auditor:                testaudit.NewAuditor(t),
 			}
 
 			res, err := svc.FilterNotes(t.Context(), tt.req)
@@ -141,4 +149,76 @@ func TestFilterNotes(t *testing.T) {
 			assert.Equal(t, tt.want, res)
 		})
 	}
+}
+
+func TestFilterNotesFailedHook(t *testing.T) {
+	t.Parallel()
+
+	t.Run("adds all fields from context", func(t *testing.T) {
+		t.Parallel()
+
+		spaceID := uuid.New()
+		noteIDs := []uuid.UUID{uuid.New(), uuid.New()}
+
+		ctx := context.Background()
+		ctx = serviceinternal.WithServiceName(ctx)
+		ctx = serviceinternal.WithMessage(ctx, "user is not member")
+		ctx = serviceinternal.WithLevel(ctx, audit.ErrLevelWarn)
+		ctx = serviceinternal.WithErrorCode(ctx, audit.ErrCodePermDeniedSpace)
+		ctx = serviceinternal.WithMessageCtx(ctx, audit.EventContext{"space_id": "space-1"})
+		ctx = serviceinternal.WithUserID(ctx, "user-1")
+		ctx = serviceinternal.WithOperation(ctx, "politics.filter_notes")
+		ctx = serviceinternal.WithKind(ctx, audit.KindDomain)
+		ctx = withSpaceID(ctx, spaceID)
+		ctx = withNoteIDs(ctx, noteIDs)
+
+		stash := FilterNotesFailedHook(ctx, audit.Stash{})
+		values := stashFieldsByName(stash)
+
+		require.Equal(t, "auth-service", values["ServiceName"])
+		require.Equal(t, "user is not member", values["Message"])
+		require.Equal(t, audit.ErrLevelWarn, values["Level"])
+		require.Equal(t, audit.ErrCodePermDeniedSpace, values["ErrorCode"])
+		require.Equal(t, "user-1", values["UserID"])
+		require.Equal(t, "politics.filter_notes", values["Operation"])
+		require.Equal(t, audit.KindDomain, values["Kind"])
+		require.Equal(t, audit.EventContext{"space_id": spaceID.String(), "note_ids": noteIDs}, values["Context"])
+	})
+
+	t.Run("returns unchanged stash when context is empty", func(t *testing.T) {
+		t.Parallel()
+
+		stash := FilterNotesFailedHook(context.Background(), audit.Stash{})
+		values := stashFieldsByName(stash)
+
+		require.Empty(t, values)
+	})
+}
+
+func stashFieldsByName(stash audit.Stash) map[string]any {
+	v := reflect.ValueOf(&stash).Elem()
+
+	fields := v.FieldByName("fields")
+	if !fields.IsValid() || fields.IsNil() {
+		return map[string]any{}
+	}
+
+	fields = reflect.NewAt(fields.Type(), unsafe.Pointer(fields.UnsafeAddr())).Elem()
+
+	result := make(map[string]any, fields.Len())
+
+	iter := fields.MapRange()
+	for iter.Next() {
+		key := iter.Key().Interface()
+		keyName := fmt.Sprint(key)
+
+		fieldIface := iter.Value().Interface()
+
+		valueField := reflect.ValueOf(fieldIface).FieldByName("Value")
+		if valueField.IsValid() && valueField.CanInterface() {
+			result[keyName] = valueField.Interface()
+		}
+	}
+
+	return result
 }

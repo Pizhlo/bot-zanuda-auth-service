@@ -2,6 +2,7 @@ package politics
 
 import (
 	"auth-service/internal/model"
+	"auth-service/pkg/audit"
 	"context"
 	"errors"
 
@@ -14,6 +15,11 @@ type Service struct {
 	storage                storage
 	spaceAccessChecker     spaceAccessChecker
 	notePermissionResolver notePermissionResolver
+	auditor                auditor
+}
+
+type auditor interface {
+	Create(ctx context.Context) audit.Event
 }
 
 // storage - интерфейс для доступа к хранилищу.
@@ -26,10 +32,13 @@ type storage interface {
 }
 
 type spaceAccessChecker interface {
+	// CheckSpaceAccess проверяет, есть ли у пользователя доступ к пространству.
 	CheckSpaceAccess(ctx context.Context, userID, spaceID uuid.UUID) (model.SpaceMember, error)
 }
 
 type notePermissionResolver interface {
+	// ResolveNotePermissions определяет, к каким заметкам у пользователя есть доступ. Возвращает мапу по айди с указанием, какие
+	// заметки можно читать, какие - редактировать.
 	ResolveNotePermissions(ctx context.Context, access model.SpaceMember, noteIDs []uuid.UUID) (map[uuid.UUID]model.NoteAccessInfo, error)
 }
 
@@ -56,6 +65,13 @@ func WithNotePermissionResolver(resolver notePermissionResolver) option {
 	}
 }
 
+// WithAuditor устанавливает сервис для логирования.
+func WithAuditor(auditor auditor) option {
+	return func(s *Service) {
+		s.auditor = auditor
+	}
+}
+
 // New создает новый сервис политик.
 func New(opts ...option) (*Service, error) {
 	s := &Service{}
@@ -74,6 +90,10 @@ func New(opts ...option) (*Service, error) {
 
 	if s.notePermissionResolver == nil {
 		return nil, errors.New("note permission resolver is required")
+	}
+
+	if s.auditor == nil {
+		return nil, errors.New("auditor is required")
 	}
 
 	return s, nil

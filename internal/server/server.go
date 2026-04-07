@@ -184,6 +184,8 @@ func (s *Server) createRoutes() error {
 
 	api := e.Group("api/")
 
+	api.Use(handlerV0.FillCtx)
+
 	// v0
 	apiv0 := api.Group("v0/")
 

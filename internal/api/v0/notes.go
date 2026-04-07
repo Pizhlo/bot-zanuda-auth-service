@@ -143,7 +143,7 @@ func (s *NotesHandler) FilterNotes(c echo.Context) error {
 }
 
 func userIDFromContext(ctx context.Context) (string, bool) {
-	v := ctx.Value(withUserIDCtxKey{})
+	v := ctx.Value(userIDKey{})
 	id, ok := v.(string)
 
 	return id, ok

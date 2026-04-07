@@ -6,12 +6,50 @@ package mocks
 
 import (
 	model "auth-service/internal/model"
+	audit "auth-service/pkg/audit"
 	context "context"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
 	uuid "github.com/google/uuid"
 )
+
+// Mockauditor is a mock of auditor interface.
+type Mockauditor struct {
+	ctrl     *gomock.Controller
+	recorder *MockauditorMockRecorder
+}
+
+// MockauditorMockRecorder is the mock recorder for Mockauditor.
+type MockauditorMockRecorder struct {
+	mock *Mockauditor
+}
+
+// NewMockauditor creates a new mock instance.
+func NewMockauditor(ctrl *gomock.Controller) *Mockauditor {
+	mock := &Mockauditor{ctrl: ctrl}
+	mock.recorder = &MockauditorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *Mockauditor) EXPECT() *MockauditorMockRecorder {
+	return m.recorder
+}
+
+// Create mocks base method.
+func (m *Mockauditor) Create(ctx context.Context) audit.Event {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Create", ctx)
+	ret0, _ := ret[0].(audit.Event)
+	return ret0
+}
+
+// Create indicates an expected call of Create.
+func (mr *MockauditorMockRecorder) Create(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Create", reflect.TypeOf((*Mockauditor)(nil).Create), ctx)
+}
 
 // Mockstorage is a mock of storage interface.
 type Mockstorage struct {

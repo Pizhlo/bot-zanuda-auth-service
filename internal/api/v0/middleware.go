@@ -3,6 +3,7 @@ package v0
 import (
 	"auth-service/internal/model"
 	"auth-service/internal/storage"
+	"auth-service/pkg/audit"
 	"context"
 	"errors"
 	"net/http"
@@ -22,7 +23,7 @@ type MiddlewareHandler struct {
 //
 //go:generate mockgen -source=middleware.go -destination=mocks/mocks.go -package=mocks AuthService
 type AuthService interface {
-	CheckToken(authHeader string) (*jwt.Token, error)
+	CheckToken(ctx context.Context, authHeader string) (*jwt.Token, error)
 	GetPayload(token *jwt.Token) (jwt.MapClaims, bool)
 	GetServiceClient(ctx context.Context, clientID string) (model.ServiceClient, error)
 	GetIssuer() string
@@ -62,7 +63,9 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 
 		tokenHeader := c.Request().Header.Get("Authorization")
 
-		token, err := s.authService.CheckToken(tokenHeader)
+		ctx := c.Request().Context()
+
+		token, err := s.authService.CheckToken(ctx, tokenHeader)
 		if err != nil {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 		}
@@ -90,7 +93,7 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid request: header 'X-Telegram-User-Id' not found"})
 		}
 
-		ctx := withUserID(c.Request().Context(), userID)
+		ctx = withUserID(c.Request().Context(), userID)
 
 		req := c.Request().WithContext(ctx)
 
@@ -98,6 +101,90 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 
 		return next(c)
 	}
+}
+
+// FillCtx заполняет контекст запроса данными из заголовков.
+func FillCtx(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		ctx := c.Request().Context()
+		ctx = withTraceID(ctx, c.Request().Header.Get("X-Trace-ID"))
+		ctx = withRequestID(ctx, c.Request().Header.Get("X-Request-ID"))
+
+		ipAddress := c.Request().Header.Get("X-Forwarded-For")
+
+		if ipAddress == "" {
+			ipAddress = c.Request().RemoteAddr
+		}
+
+		ctx = withIPAddress(ctx, ipAddress)
+
+		userAgent := c.Request().Header.Get("User-Agent")
+
+		if userAgent == "" {
+			userAgent = "unknown"
+		}
+
+		ctx = withUserAgent(ctx, userAgent)
+
+		c.SetRequest(c.Request().WithContext(ctx))
+
+		return next(c)
+	}
+}
+
+type ipAddressKey struct{}
+
+func withIPAddress(ctx context.Context, ipAddress string) context.Context {
+	return context.WithValue(ctx, ipAddressKey{}, ipAddress)
+}
+
+type userAgentKey struct{}
+
+func withUserAgent(ctx context.Context, userAgent string) context.Context {
+	return context.WithValue(ctx, userAgentKey{}, userAgent)
+}
+
+type traceIDKey struct{}
+
+func withTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, traceIDKey{}, traceID)
+}
+
+type requestIDKey struct{}
+
+func withRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, requestID)
+}
+
+// ConnectionHook добавляет данные из соединения (IP-адрес, User-Agent, User-ID) в событие.
+func ConnectionHook(ctx context.Context, stash audit.Stash) audit.Stash {
+	msgCtx := audit.EventContext{}
+
+	if traceID, ok := ctx.Value(traceIDKey{}).(string); ok {
+		stash = stash.Append(audit.TraceID(traceID))
+	}
+
+	if requestID, ok := ctx.Value(requestIDKey{}).(string); ok {
+		stash = stash.Append(audit.RequestID(requestID))
+	}
+
+	if ipAddress, ok := ctx.Value(ipAddressKey{}).(string); ok {
+		msgCtx["ip_address"] = ipAddress
+	}
+
+	if userAgent, ok := ctx.Value(userAgentKey{}).(string); ok {
+		msgCtx["user_agent"] = userAgent
+	}
+
+	if userID, ok := ctx.Value(userIDKey{}).(string); ok {
+		msgCtx["user_id"] = userID
+	}
+
+	if len(msgCtx) > 0 {
+		stash = stash.Append(audit.ContextField(msgCtx, stash))
+	}
+
+	return stash
 }
 
 // verifyPayload проверяет payload токена на валидность.
@@ -134,10 +221,10 @@ func (s *MiddlewareHandler) verifyPayload(ctx context.Context, payload jwt.MapCl
 	return 0, nil
 }
 
-type withUserIDCtxKey struct{}
+type userIDKey struct{}
 
 func withUserID(ctx context.Context, value string) context.Context {
-	return context.WithValue(ctx, withUserIDCtxKey{}, value)
+	return context.WithValue(ctx, userIDKey{}, value)
 }
 
 func parseUserID(value any) string {
