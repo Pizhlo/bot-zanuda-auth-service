@@ -27,6 +27,13 @@ func TestLoadConfig(t *testing.T) {
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
+				RabbitMQ: RabbitMQ{
+					URL:            "amqp://localhost:5672/",
+					ConnectTimeout: 5 * time.Second,
+					PublishTimeout: 2 * time.Second,
+					MaxRetries:     3,
+					RetryBackoff:   100 * time.Millisecond,
+				},
 				Vault: Vault{
 					Address:     "https://localhost:8200",
 					Token:       "vault-token",
@@ -58,6 +65,93 @@ func TestLoadConfig(t *testing.T) {
 				},
 			},
 			wantErr: require.NoError,
+		},
+		{
+			name:       "valid config: redis cluster",
+			configFile: "testdata/valid_redis_cluster.yaml",
+			want: &Config{
+				LogLevel: "debug",
+				Server: Server{
+					Port:            8080,
+					ShutdownTimeout: 100 * time.Millisecond,
+				},
+				RabbitMQ: RabbitMQ{
+					URL:            "amqp://guest:guest@localhost:5672/",
+					ConnectTimeout: 5 * time.Second,
+					PublishTimeout: 2 * time.Second,
+					MaxRetries:     3,
+					RetryBackoff:   100 * time.Millisecond,
+				},
+				Vault: Vault{
+					Address:     "https://localhost:8200",
+					Token:       "vault-token",
+					SecretsPath: "secret/data",
+				},
+				Redis: Redis{
+					Type:  RedisTypeCluster,
+					Addrs: []string{"localhost:6379"},
+				},
+				Postgres: Postgres{
+					Host:          "localhost",
+					Port:          5432,
+					User:          "user",
+					Password:      "pass",
+					DBName:        "db",
+					InsertTimeout: 5 * time.Second,
+					ReadTimeout:   5 * time.Second,
+				},
+				Auth: Auth{
+					SecretKey:         "your-key",
+					UpdateKeyInterval: 1 * time.Hour,
+					Issuer:            "test",
+					TokenDuration:     1 * time.Hour,
+					UserCacheTTL:      1 * time.Hour,
+				},
+				Policy: Policy{
+					Config: "casbin_model.conf",
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name:       "error: config file not found",
+			configFile: "testdata/__does_not_exist__.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error read file")
+			},
+		},
+		{
+			name:       "error: invalid yaml",
+			configFile: "testdata/invalid_yaml.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error unmarshal")
+			},
+		},
+		{
+			name:       "error: redis single without host and port",
+			configFile: "testdata/redis_single_invalid.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error validate redis")
+			},
+		},
+		{
+			name:       "error: audit enabled but topic empty",
+			configFile: "testdata/audit_empty_topic.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "audit is enabled but errors topic is not set")
+			},
+		},
+		{
+			name:       "error: audit enabled but rabbitmq url empty",
+			configFile: "testdata/rabbit_empty_url.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error validate rabbitmq")
+			},
 		},
 		{
 			name:       "invalid config",
@@ -262,6 +356,128 @@ func TestValidateRedisClusterConfig(t *testing.T) {
 			t.Parallel()
 
 			err := validateRedisClusterConfig(&tt.cfg.Redis)
+			tt.wantErr(t, err)
+		})
+	}
+}
+
+//nolint:funlen // длинный тест
+func TestValidateRabbitMQConfig(t *testing.T) {
+	t.Parallel()
+
+	valid := RabbitMQ{
+		URL:            "amqp://localhost:5672/",
+		ConnectTimeout: 5 * time.Second,
+		PublishTimeout: 2 * time.Second,
+		MaxRetries:     3,
+		RetryBackoff:   100 * time.Millisecond,
+	}
+
+	tests := []struct {
+		name    string
+		cfg     RabbitMQ
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name:    "valid config",
+			cfg:     valid,
+			wantErr: require.NoError,
+		},
+		{
+			name: "valid config: amqps url",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.URL = "amqps://guest:guest@localhost:5672/"
+
+				return c
+			}(),
+			wantErr: require.NoError,
+		},
+		{
+			name: "missing url",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.URL = ""
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq url is not set")
+			},
+		},
+		{
+			name: "missing connect timeout",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.ConnectTimeout = 0
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq connect timeout is not set")
+			},
+		},
+		{
+			name: "missing publish timeout",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.PublishTimeout = 0
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq publish timeout is not set")
+			},
+		},
+		{
+			name: "missing max retries",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.MaxRetries = 0
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq max retries is not set")
+			},
+		},
+		{
+			name: "missing retry backoff",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.RetryBackoff = 0
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq retry backoff is not set")
+			},
+		},
+		{
+			name: "invalid config: rabbitmq url must start with amqp://",
+			cfg: func() RabbitMQ {
+				c := valid
+				c.URL = "http://localhost:5672/"
+
+				return c
+			}(),
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "rabbitmq url must start with amqp:// or amqps://")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateRabbitMQConfig(&tt.cfg)
 			tt.wantErr(t, err)
 		})
 	}

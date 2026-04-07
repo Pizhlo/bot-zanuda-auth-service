@@ -14,6 +14,18 @@ auth:
   token_duration: 1h
   user_cache_ttl: 1h
 
+rabbitmq:
+  # Connection string
+  url: "amqp://localhost:5672/"
+  
+  # Таймауты
+  connect_timeout: 5s
+  publish_timeout: 2s
+  
+  # Retry
+  max_retries: 3
+  retry_backoff: 100ms
+
 vault:
   address: "https://localhost:8200"
   token: "vault-token"

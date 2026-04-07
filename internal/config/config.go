@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -19,6 +21,7 @@ type Config struct {
 	Postgres Postgres `yaml:"postgres" validate:"required"`
 	Auth     Auth     `yaml:"auth" validate:"required"`
 	Policy   Policy   `yaml:"policy" validate:"required"`
+	RabbitMQ RabbitMQ `yaml:"rabbitmq"`
 }
 
 // Auth - данные для работы Auth-сервиса.
@@ -46,6 +49,15 @@ type Vault struct {
 	ClientCertPath  string `yaml:"client_cert_path" validate:"omitempty"`  // Путь к клиентскому сертификату (опционально)
 	ClientKeyPath   string `yaml:"client_key_path" validate:"omitempty"`   // Путь к клиентскому ключу (опционально)
 	SecretsPath     string `yaml:"secrets_path" validate:"required"`       // где хранится bot API key в Vault
+}
+
+// RabbitMQ - конфигурация RabbitMQ.
+type RabbitMQ struct {
+	URL            string        `yaml:"url"`
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+	PublishTimeout time.Duration `yaml:"publish_timeout"`
+	MaxRetries     int           `yaml:"max_retries"`
+	RetryBackoff   time.Duration `yaml:"retry_backoff"`
 }
 
 // RedisType - тип подключения к Redis: single - один узел, cluster - кластер.
@@ -111,6 +123,43 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func validateRabbitMQConfig(cfg *RabbitMQ) error {
+	if cfg.URL == "" {
+		return fmt.Errorf("config: rabbitmq url is not set")
+	}
+
+	if !strings.HasPrefix(cfg.URL, "amqp://") && !strings.HasPrefix(cfg.URL, "amqps://") {
+		return fmt.Errorf("config: rabbitmq url must start with amqp:// or amqps://")
+	}
+
+	u, err := url.Parse(cfg.URL)
+	if err != nil {
+		return fmt.Errorf("config: rabbitmq url is not valid: %w", err)
+	}
+
+	if u.Host == "" {
+		return fmt.Errorf("config: rabbitmq url host is not set")
+	}
+
+	if cfg.ConnectTimeout <= 0 {
+		return fmt.Errorf("config: rabbitmq connect timeout is not set")
+	}
+
+	if cfg.PublishTimeout <= 0 {
+		return fmt.Errorf("config: rabbitmq publish timeout is not set")
+	}
+
+	if cfg.MaxRetries <= 0 {
+		return fmt.Errorf("config: rabbitmq max retries is not set")
+	}
+
+	if cfg.RetryBackoff <= 0 {
+		return fmt.Errorf("config: rabbitmq retry backoff is not set")
+	}
+
+	return nil
 }
 
 func (cfg *Config) validateRedisConfig() error {
