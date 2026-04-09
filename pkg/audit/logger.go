@@ -23,6 +23,8 @@ var levelNames = map[slog.Level]string{
 }
 
 // InitLogger инициализирует логгер для аудита.
+//
+//nolint:goconst // нет смысла выводить в константы строковые значения.
 func InitLogger() *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: LevelAudit,

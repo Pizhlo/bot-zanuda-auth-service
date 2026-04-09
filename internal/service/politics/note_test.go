@@ -175,14 +175,14 @@ func TestFilterNotesFailedHook(t *testing.T) {
 		stash := FilterNotesFailedHook(ctx, audit.Stash{})
 		values := stashFieldsByName(stash)
 
-		require.Equal(t, "auth-service", values["ServiceName"])
-		require.Equal(t, "user is not member", values["Message"])
-		require.Equal(t, audit.ErrLevelWarn, values["Level"])
-		require.Equal(t, audit.ErrCodePermDeniedSpace, values["ErrorCode"])
-		require.Equal(t, "user-1", values["UserID"])
-		require.Equal(t, "politics.filter_notes", values["Operation"])
-		require.Equal(t, audit.KindDomain, values["Kind"])
-		require.Equal(t, audit.EventContext{"space_id": spaceID.String(), "note_ids": noteIDs}, values["Context"])
+		require.Equal(t, "auth-service", values["service_name"])
+		require.Equal(t, "user is not member", values["message"])
+		require.Equal(t, audit.ErrLevelWarn, values["level"])
+		require.Equal(t, audit.ErrCodePermDeniedSpace, values["error_code"])
+		require.Equal(t, "user-1", values["user_id"])
+		require.Equal(t, "politics.filter_notes", values["operation"])
+		require.Equal(t, audit.KindDomain, values["kind"])
+		require.Equal(t, audit.EventContext{"space_id": spaceID.String(), "note_ids": noteIDs}, values["context"])
 	})
 
 	t.Run("returns unchanged stash when context is empty", func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"auth-service/internal/model"
 	"auth-service/internal/service/internal"
 	db "auth-service/internal/storage"
+	"auth-service/internal/storage/vault"
 	"auth-service/pkg/audit"
 	"context"
 	"crypto/subtle"
@@ -26,6 +27,8 @@ var (
 	ErrInvalidScope = errors.New("invalid scope")
 	// ErrInvalidGrantType возвращается, если grant type неверный.
 	ErrInvalidGrantType = errors.New("invalid grant type")
+	// ErrEmptyLoginRequest возвращается, если запрос на авторизацию пуст.
+	ErrEmptyLoginRequest = errors.New("empty login request")
 )
 
 const (
@@ -49,6 +52,20 @@ func (s *Service) Login(ctx context.Context, req model.LoginRequest) (model.Logi
 		event := s.auditor.Create(fillCtx(ctx))
 		defer internal.WithPanicRecovery(ctx, event)()
 
+		event.AppendContext(audit.EventContext{
+			"client_id":  req.ClientID,
+			"grant_type": req.GrantType,
+			"scope":      req.Scope,
+		})
+
+		if req.IsEmpty() {
+			event.Append(audit.Message(messageEmptyLoginRequest))
+			event.WithError(audit.ErrCodeEmptyLoginRequest, audit.KindValidation, ErrEmptyLoginRequest)
+			event.Append(audit.Level(audit.ErrLevelWarn))
+
+			return model.LoginResponse{}, ErrEmptyLoginRequest
+		}
+
 		event.WithError(audit.ErrCodeInvalidGrantType, audit.KindValidation, ErrInvalidGrantType)
 		event.Append(audit.Level(audit.ErrLevelWarn))
 
@@ -61,6 +78,7 @@ const (
 	messageInactiveClient      = "client is inactive"
 	messageInvalidSecret       = "invalid client secret"
 	messageVaultSecretNotFound = "vault secret not found"
+	messageEmptyLoginRequest   = "got empty body in login request"
 )
 
 //nolint:funlen // много проверок аудита.
@@ -71,6 +89,12 @@ func (s *Service) loginWithClientCredentials(ctx context.Context, req model.Logi
 
 	event := s.auditor.Create(fillCtx(ctx))
 	defer internal.WithPanicRecovery(ctx, event)()
+
+	event.AppendContext(audit.EventContext{
+		"client_id":  req.ClientID,
+		"grant_type": req.GrantType,
+		"scope":      req.Scope,
+	})
 
 	client, err := s.validateClient(ctx, req.ClientID)
 	if err != nil {
@@ -179,6 +203,10 @@ func (s *Service) validateSecret(clientID string, clientSecret string) error {
 	vaultSecret, err := s.vaultClient.GetClientSecret(clientID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
+			return ErrClientSecretNotFound
+		}
+
+		if errors.Is(err, vault.ErrClientSecretNotFound) {
 			return ErrClientSecretNotFound
 		}
 

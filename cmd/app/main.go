@@ -13,6 +13,7 @@ import (
 	"auth-service/internal/service/redis"
 	"auth-service/internal/service/user"
 	repo "auth-service/internal/storage/postgres"
+	"auth-service/internal/storage/rabbitmq"
 	"auth-service/internal/storage/vault"
 	"auth-service/pkg/audit"
 	"context"
@@ -88,7 +89,24 @@ func main() {
 
 	defer butler.stop(ctx, repo)
 
-	auditor := initAuditor()
+	var (
+		rabbitMQ *rabbitmq.Client
+		sender   audit.Sender
+	)
+
+	if config.Audit.BrokerEnabled {
+		rabbitMQ = initRabbitMQStorage(config.RabbitMQ, []string{config.Audit.Topic})
+
+		if err := rabbitMQ.Run(notifyCtx); err != nil {
+			logrus.WithError(err).Fatal("failed to connect to rabbitmq")
+		}
+
+		defer butler.stop(ctx, rabbitMQ)
+
+		sender = initSender(config.Audit, rabbitMQ)
+	}
+
+	auditor := initAuditor(config.Audit, sender)
 
 	authSvc := initAuthService(vaultClient, config.Auth, repo, auditor)
 
@@ -140,7 +158,7 @@ func initEnforcer(cfg *config.Config) *enforcer.Enforcer {
 	return start(enforcer.NewEnforcer(enforcer.WithDsn(dsn), enforcer.WithModelConf(cfg.Policy.Config)))
 }
 
-func initAuditor() *audit.Auditor {
+func initAuditor(cfg config.AuditConfig, sender audit.Sender) *audit.Auditor {
 	logrus.Info("initializing error event builder")
 
 	return audit.NewAuditor(
@@ -148,6 +166,11 @@ func initAuditor() *audit.Auditor {
 		audit.WithHook(handlerV0.ConnectionHook),
 		audit.WithHook(politics.FilterNotesFailedHook),
 		audit.WithHook(user.GetUserIDByTelegramIDHook),
+		audit.WithIncludeLevels(cfg.Levels.Include),
+		audit.WithExcludeLevels(cfg.Levels.Exclude),
+		audit.WithIncludeKinds(cfg.Kinds.Include),
+		audit.WithExcludeKinds(cfg.Kinds.Exclude),
+		audit.WithSender(sender),
 	)
 }
 
@@ -322,6 +345,40 @@ func initRedisStorage(ctx context.Context, cfg config.Redis) *redis.Service {
 	startService(redis.Connect(ctx), "redis connect")
 
 	return redis
+}
+
+func initRabbitMQStorage(cfg config.RabbitMQ, errorsTopics []string) *rabbitmq.Client {
+	logrus.WithFields(logrus.Fields{
+		"url":            cfg.URL,
+		"connectTimeout": cfg.ConnectTimeout,
+		"publishTimeout": cfg.PublishTimeout,
+		"maxRetries":     cfg.MaxRetries,
+		"retryBackoff":   cfg.RetryBackoff,
+	}).Info("initializing rabbitmq")
+
+	client := start(
+		rabbitmq.NewClient(
+			rabbitmq.WithURL(cfg.URL),
+			rabbitmq.WithTopics(errorsTopics),
+			rabbitmq.WithConnectTimeout(cfg.ConnectTimeout),
+			rabbitmq.WithPublishTimeout(cfg.PublishTimeout),
+			rabbitmq.WithMaxRetries(cfg.MaxRetries),
+			rabbitmq.WithRetryBackoff(cfg.RetryBackoff),
+		),
+	)
+
+	return client
+}
+
+func initSender(cfg config.AuditConfig, rabbitMQ *rabbitmq.Client) audit.Sender {
+	logrus.WithFields(logrus.Fields{
+		"topic": cfg.Topic,
+	}).Info("initializing sender")
+
+	return start(audit.NewSender(
+		audit.WithClient(rabbitMQ),
+		audit.WithTopic(cfg.Topic),
+	))
 }
 
 func startService(err error, name string) {

@@ -15,8 +15,10 @@ type panicRecoveryEventStub struct {
 	endCalls int
 }
 
-func (s *panicRecoveryEventStub) End(ctx context.Context) {
+func (s *panicRecoveryEventStub) End(ctx context.Context) error {
 	s.endCalls++
+
+	return nil
 }
 
 func TestWithMessageCtx(t *testing.T) {

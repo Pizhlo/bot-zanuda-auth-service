@@ -15,13 +15,14 @@ import (
 type Config struct {
 	LogLevel string `yaml:"log_level" validate:"required,oneof=debug info warn error"`
 
-	Server   Server   `yaml:"server" validate:"required"`
-	Vault    Vault    `yaml:"vault" validate:"required"`
-	Redis    Redis    `yaml:"redis" validate:"required"`
-	Postgres Postgres `yaml:"postgres" validate:"required"`
-	Auth     Auth     `yaml:"auth" validate:"required"`
-	Policy   Policy   `yaml:"policy" validate:"required"`
-	RabbitMQ RabbitMQ `yaml:"rabbitmq"`
+	Server   Server      `yaml:"server" validate:"required"`
+	Vault    Vault       `yaml:"vault" validate:"required"`
+	Redis    Redis       `yaml:"redis" validate:"required"`
+	Postgres Postgres    `yaml:"postgres" validate:"required"`
+	Auth     Auth        `yaml:"auth" validate:"required"`
+	Policy   Policy      `yaml:"policy" validate:"required"`
+	Audit    AuditConfig `yaml:"audit" validate:"required"`
+	RabbitMQ RabbitMQ    `yaml:"rabbitmq"`
 }
 
 // Auth - данные для работы Auth-сервиса.
@@ -49,6 +50,28 @@ type Vault struct {
 	ClientCertPath  string `yaml:"client_cert_path" validate:"omitempty"`  // Путь к клиентскому сертификату (опционально)
 	ClientKeyPath   string `yaml:"client_key_path" validate:"omitempty"`   // Путь к клиентскому ключу (опционально)
 	SecretsPath     string `yaml:"secrets_path" validate:"required"`       // где хранится bot API key в Vault
+}
+
+// AuditConfig - конфигурация аудита.
+type AuditConfig struct {
+	BrokerEnabled bool   `yaml:"broker_enabled"` // включить отправку в RabbitMQ
+	Topic         string `yaml:"topic"`          // топик для отправки ошибок
+
+	// какие виды ошибок отправлять в rabbitmq. если не заданы, то отправляются все виды.
+	// если установлены и levels, и kinds, то событие будет отправлено только если оно соответствует обоим условиям.
+	// если правило попало и в include, и в exclude, то событие не будет отправлено.
+	Kinds struct {
+		Include []string `yaml:"include"` // включить виды ошибок
+		Exclude []string `yaml:"exclude"` // исключить виды ошибок
+	} `yaml:"kinds"`
+
+	// какие уровни ошибок отправлять в rabbitmq. если не заданы, то отправляются все уровни.
+	// если установлены и levels, и kinds, то событие будет отправлено только если оно соответствует обоим условиям.
+	// если правило попало и в include, и в exclude, то событие не будет отправлено.
+	Levels struct {
+		Include []string `yaml:"include"` // включить уровни ошибок
+		Exclude []string `yaml:"exclude"` // исключить уровни ошибок
+	} `yaml:"levels"`
 }
 
 // RabbitMQ - конфигурация RabbitMQ.
@@ -110,6 +133,16 @@ func LoadConfig(path string) (*Config, error) {
 	// Парсим YAML
 	if err := yaml.Unmarshal(yamlFile, cfg); err != nil {
 		return nil, fmt.Errorf("config: error unmarshal: %w", err)
+	}
+
+	if cfg.Audit.BrokerEnabled {
+		if err := validateRabbitMQConfig(&cfg.RabbitMQ); err != nil {
+			return nil, fmt.Errorf("config: error validate rabbitmq: %w", err)
+		}
+
+		if len(strings.TrimSpace(cfg.Audit.Topic)) == 0 {
+			return nil, fmt.Errorf("config: audit is enabled but errors topic is not set")
+		}
 	}
 
 	validate := validator.New()

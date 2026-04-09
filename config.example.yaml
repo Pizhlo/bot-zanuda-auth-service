@@ -15,6 +15,30 @@ auth:
   token_duration: 1h
   user_cache_ttl: 1h
 
+audit:
+  # Включить отправку в RabbitMQ
+  broker_enabled: true
+  
+  # Топик по умолчанию
+  topic: "errors.auth-service"
+  
+  # Фильтр по типам ошибок
+  kinds:
+    # Отправлять в RabbitMQ (остальные идут только в stdout)
+    include:
+      - infra      # критично, алерты
+      - internal   # баги, паники
+      - external   # внешние API сбои
+    # Исключить (даже если в include)
+    exclude: []
+  
+  # Уровни логов
+  levels:
+    include:
+      - error
+      - fatal
+    exclude: []
+
 rabbitmq:
   # Connection string
   url: "amqp://guest:guest@localhost:5672/"

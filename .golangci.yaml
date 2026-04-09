@@ -24,7 +24,6 @@ linters:
     - revive
     - gocritic
     - misspell
-    - goconst
     - prealloc
     - unparam
     - dupword
@@ -56,6 +55,9 @@ linters:
     - gosec          # базовые проверки безопасности
     - forbidigo      # запрет отдельных вызовов/идентификаторов
     - nolintlint     # корректность использования //nolint
+
+  disable:
+    - goconst
 
   settings:
     # Набор проверок стиля/качества кода от revive

@@ -3,6 +3,7 @@ package auth
 import (
 	"auth-service/internal/model"
 	db "auth-service/internal/storage"
+	"auth-service/internal/storage/vault"
 	"errors"
 	"testing"
 	"time"
@@ -470,6 +471,20 @@ func TestValidateSecret(t *testing.T) {
 				t.Helper()
 
 				m.mockVaultClient.EXPECT().GetClientSecret("client_id").Return("", db.ErrNotFound)
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorIs(t, err, ErrClientSecretNotFound)
+			},
+		},
+		{
+			name:         "returns not found when vault returns client secret not found",
+			clientID:     "client_id",
+			clientSecret: "client_secret",
+			setupMocks: func(t *testing.T, m *mockMocks) {
+				t.Helper()
+
+				m.mockVaultClient.EXPECT().GetClientSecret("client_id").Return("", vault.ErrClientSecretNotFound)
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)

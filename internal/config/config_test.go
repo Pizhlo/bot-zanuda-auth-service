@@ -7,16 +7,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:funlen // длинный тест
+//nolint:funlen,dupl // длинный тест; похожие тест-кейсы
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		configFile    string
-		want          *Config
-		wantErr       require.ErrorAssertionFunc
-		operationsErr require.ErrorAssertionFunc
+		name       string
+		configFile string
+		want       *Config
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name:       "valid config",
@@ -26,6 +25,90 @@ func TestLoadConfig(t *testing.T) {
 				Server: Server{
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
+				},
+				Audit: AuditConfig{
+					BrokerEnabled: true,
+					Topic:         "errors.auth-service",
+					Kinds: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"infra", "internal", "external"},
+						Exclude: []string{},
+					},
+					Levels: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"error", "fatal"},
+						Exclude: []string{},
+					},
+				},
+				RabbitMQ: RabbitMQ{
+					URL:            "amqp://localhost:5672/",
+					ConnectTimeout: 5 * time.Second,
+					PublishTimeout: 2 * time.Second,
+					MaxRetries:     3,
+					RetryBackoff:   100 * time.Millisecond,
+				},
+				Vault: Vault{
+					Address:     "https://localhost:8200",
+					Token:       "vault-token",
+					SecretsPath: "secret/data",
+				},
+				Redis: Redis{
+					Type: RedisTypeSingle,
+					Host: "localhost",
+					Port: 6379,
+				},
+				Postgres: Postgres{
+					Host:          "localhost",
+					Port:          5432,
+					User:          "user",
+					Password:      "pass",
+					DBName:        "db",
+					InsertTimeout: 5 * time.Second,
+					ReadTimeout:   5 * time.Second,
+				},
+				Auth: Auth{
+					SecretKey:         "your-key",
+					UpdateKeyInterval: 1 * time.Hour,
+					Issuer:            "test",
+					TokenDuration:     1 * time.Hour,
+					UserCacheTTL:      1 * time.Hour,
+				},
+				Policy: Policy{
+					Config: "casbin_model.conf",
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name:       "valid config: audit disabled",
+			configFile: "testdata/valid_audit_disabled.yaml",
+			want: &Config{
+				LogLevel: "debug",
+				Server: Server{
+					Port:            8080,
+					ShutdownTimeout: 100 * time.Millisecond,
+				},
+				Audit: AuditConfig{
+					BrokerEnabled: false,
+					Topic:         "errors.auth-service",
+					Kinds: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"infra", "internal", "external"},
+						Exclude: []string{},
+					},
+					Levels: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"error", "fatal"},
+						Exclude: []string{},
+					},
 				},
 				RabbitMQ: RabbitMQ{
 					URL:            "amqp://localhost:5672/",
@@ -75,8 +158,26 @@ func TestLoadConfig(t *testing.T) {
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
+				Audit: AuditConfig{
+					BrokerEnabled: true,
+					Topic:         "errors.auth-service",
+					Kinds: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"infra", "internal", "external"},
+						Exclude: []string{},
+					},
+					Levels: struct {
+						Include []string `yaml:"include"`
+						Exclude []string `yaml:"exclude"`
+					}{
+						Include: []string{"error", "fatal"},
+						Exclude: []string{},
+					},
+				},
 				RabbitMQ: RabbitMQ{
-					URL:            "amqp://guest:guest@localhost:5672/",
+					URL:            "amqp://localhost:5672/",
 					ConnectTimeout: 5 * time.Second,
 					PublishTimeout: 2 * time.Second,
 					MaxRetries:     3,
