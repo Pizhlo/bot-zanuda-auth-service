@@ -81,6 +81,10 @@ func (s *AuthHandler) Login(c echo.Context) error {
 			return c.JSON(http.StatusForbidden, map[string]string{"error": "invalid scope"})
 		}
 
+		if errors.Is(err, auth.ErrEmptyLoginRequest) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty login request"})
+		}
+
 		logrus.WithError(err).Error("error logging in")
 
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})

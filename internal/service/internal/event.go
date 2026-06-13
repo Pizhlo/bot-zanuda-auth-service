@@ -4,6 +4,8 @@ import (
 	"auth-service/pkg/audit"
 	"context"
 	"fmt"
+
+	"github.com/sirupsen/logrus"
 )
 
 // MessageContextKey - ключ для контекста сообщения.
@@ -99,7 +101,7 @@ func WithOperation(ctx context.Context, operation string) context.Context {
 func WithPanicRecovery(ctx context.Context, event audit.Event) func() {
 	// метода End() нет в основном интерфейсе, но мы можем получить к нему доступ через тип assertion.
 	type ender interface {
-		End(ctx context.Context)
+		End(ctx context.Context) error
 	}
 
 	return func() {
@@ -109,14 +111,20 @@ func WithPanicRecovery(ctx context.Context, event audit.Event) func() {
 			event.Append(audit.Level(audit.ErrLevelPanic))
 
 			if ender, ok := event.(ender); ok {
-				ender.End(ctx)
+				err := ender.End(ctx)
+				if err != nil {
+					logrus.Errorf("error ending event: %v", err)
+				}
 			}
 
 			panic(r)
 		}
 
 		if ender, ok := event.(ender); ok {
-			ender.End(ctx)
+			err := ender.End(ctx)
+			if err != nil {
+				logrus.Errorf("error ending event: %v", err)
+			}
 		}
 	}
 }

@@ -16,7 +16,7 @@ auth:
 
 audit:
   # Включить отправку в RabbitMQ
-  broker_enabled: true
+  broker_enabled: false
   
   # Топик по умолчанию
   topic: "errors.auth-service"

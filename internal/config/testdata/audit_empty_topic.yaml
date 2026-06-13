@@ -19,7 +19,7 @@ audit:
   broker_enabled: true
   
   # Топик по умолчанию
-  topic: "errors.auth-service"
+  topic: ""
   
   # Фильтр по типам ошибок (минимум 1)
   kinds:

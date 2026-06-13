@@ -40,7 +40,7 @@ audit:
 
 rabbitmq:
   # Connection string
-  url: "amqp://localhost:5672/"
+  url: ""
   
   # Таймауты
   connect_timeout: 5s

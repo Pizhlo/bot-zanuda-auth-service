@@ -2,11 +2,15 @@ package vault
 
 import (
 	"auth-service/internal/storage"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 )
+
+// ErrClientSecretNotFound ошибка о том, что секрет клиента в Vault не найден.
+var ErrClientSecretNotFound = errors.New("client secret not found")
 
 // GetClientSecret получает секрет клиента из Vault по clientID по пути, указанному в secretsPath.
 func (c *Client) GetClientSecret(clientID string) (string, error) {
@@ -22,7 +26,7 @@ func (c *Client) GetClientSecret(clientID string) (string, error) {
 	}
 
 	if secret == nil {
-		return "", fmt.Errorf("secret %q not found", path)
+		return "", ErrClientSecretNotFound
 	}
 
 	// Для KV v2 реальные данные лежат в secret.Data["data"]

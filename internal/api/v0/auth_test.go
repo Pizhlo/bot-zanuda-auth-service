@@ -239,6 +239,21 @@ func TestAuthHandler_Login(t *testing.T) {
 				require.Equal(t, "internal server error", actual.errMsg)
 			},
 		},
+		{
+			name: "error case: empty login request",
+			body: model.LoginRequest{},
+			setupMocks: func(t *testing.T, authSvc *mocks.MockauthSerivce) {
+				t.Helper()
+
+				authSvc.EXPECT().Login(gomock.Any(), gomock.Any()).Return(model.LoginResponse{}, auth.ErrEmptyLoginRequest)
+			},
+			checkWant: func(actual wantResponse) {
+				t.Helper()
+
+				require.Equal(t, http.StatusBadRequest, actual.status)
+				require.Equal(t, "empty login request", actual.errMsg)
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -293,4 +308,50 @@ func TestAuthHandler_Login(t *testing.T) {
 			tt.checkWant(actual)
 		})
 	}
+}
+
+func TestLoginRequest_InvalidBody(t *testing.T) {
+	t.Parallel()
+
+	e := echo.New()
+
+	body := `
+	{
+		"grant_type": "client_credentials",
+		"client_id": "client_id",
+		"client_secret": "client_secret",
+		"scope": "bot",
+	}
+	`
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/login", bytes.NewBufferString(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	authSvc := mocks.NewMockauthSerivce(ctrl)
+
+	authHandler, err := NewAuthHandler(WithAuthService(authSvc))
+	require.NoError(t, err)
+
+	ctx := withUserID(req.Context(), uuid.New().String())
+
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err = authHandler.Login(c)
+	require.NoError(t, err)
+
+	// Пытаемся распарсить ошибку (если она есть).
+	var errResp map[string]string
+
+	respBody := rec.Body.Bytes()
+
+	_ = json.Unmarshal(respBody, &errResp)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "cannot bind request", errResp["error"])
 }

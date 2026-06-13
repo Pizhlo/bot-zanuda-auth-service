@@ -9,7 +9,43 @@ services:
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     cap_add:
       - IPC_LOCK
+    healthcheck:
+      test: ["CMD-SHELL", "VAULT_ADDR=http://127.0.0.1:8200 vault status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     command: ["server", "-dev"]
+
+  setup-vault: # подготавливает vault для работы сервиса. добавляет bot API key в vault.
+    image: hashicorp/vault:1.18
+    container_name: auth-service-vault-setup
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN}
+      BOT_API_KEY: ${BOT_API_KEY} # bot API key
+      VAULT_ADDR: "http://127.0.0.1:8200"
+      VAULT_SECRETS_PATH: ${VAULT_SECRETS_PATH:-secret/data/api-key} # путь по умолчанию, если не задан
+    depends_on:
+      vault:
+        condition: service_healthy 
+    volumes:
+      - vault_data:/vault/file 
+    profiles:
+      - init
+    network_mode: "service:vault"
+    command: >
+      sh -c "
+        echo '🔑 Vault initialized' &&
+        vault login $${VAULT_DEV_ROOT_TOKEN_ID} &&
+        if vault kv put $${VAULT_SECRETS_PATH} api_key=$${BOT_API_KEY}; then
+          echo '✅ API key written to $${VAULT_SECRETS_PATH}' &&
+          echo '🔑 Setup complete' &&
+          exit 0
+        else
+          echo '❌ FAILED to write API key to $${VAULT_SECRETS_PATH}' &&
+          exit 1
+        fi
+      "
 
   redis:
     image: "redis:alpine"
@@ -58,6 +94,8 @@ services:
           condition: service_started
         vault:
           condition: service_started
+        rabbitmq:
+          condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v0/health || exit 1"]
       interval: 10s
@@ -71,11 +109,45 @@ services:
     depends_on:
       auth-service:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     volumes:
       - ./config-pytests.yaml:/app/config.yaml:ro
     command: make test-auth-service
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: auth-service-rabbitmq-tests
+    restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # Инициализация очередей: DLX, DLQ, policy и очередь errors.auth-service.
+  # Запускается отдельно через `make docker-tests-up` (profile init), не вместе с `up`:
+  # иначе `--abort-on-container-exit` остановит стек при exit code 0 setup-контейнера.
+  rabbitmq-setup:
+    image: curlimages/curl
+    container_name: auth-service-rabbitmq-setup-tests
+    profiles:
+      - init
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    network_mode: "service:rabbitmq"
+    volumes:
+      - ./scripts/rabbitmq-setup.sh:/setup/rabbitmq-setup.sh:ro
+    command: ["sh", "/setup/rabbitmq-setup.sh"]
 
 volumes:
   vault_data:
   redis-data:
   pgdata:
+  rabbitmq-data:

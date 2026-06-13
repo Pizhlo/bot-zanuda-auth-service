@@ -196,7 +196,7 @@ start-vault:
 	@echo "> starting vault..."
 	docker-compose up -d vault
 	@echo "> vault started successfully"
-	docker logs auth-service-vault
+	docker logs auth-service-vault-$(DB)
 
 stop-vault:
 	@echo "> stopping vault..."
@@ -214,7 +214,7 @@ start-redis:
 	@echo "> starting redis..."
 	docker-compose up -d redis
 	@echo "> redis started successfully"
-	docker logs auth-service-redis
+	docker logs auth-service-redis-$(DB)
 
 stop-redis:
 	@echo "> stopping redis..."
@@ -304,6 +304,35 @@ testdata-down:
 
 .PHONY: add-test-user remove-test-user add-test-space remove-test-space add-test-notes remove-test-notes testdata-up testdata-down
 
+RABBITMQ ?= true
+
+# Базовые сервисы (всегда)
+BASE_SERVICES := postgres vault redis
+
+# Условные сервисы
+ifeq ($(RABBITMQ),true)
+    ALL_SERVICES := $(BASE_SERVICES) rabbitmq
+else
+    ALL_SERVICES := $(BASE_SERVICES)
+endif
+
+containers-up:
+	@echo "🚀 Starting services: $(ALL_SERVICES)"
+	docker compose -f docker-compose.yaml --profile init run --rm setup-vault
+ifeq ($(RABBITMQ),true)
+	docker compose -f docker-compose.yaml --profile init run --rm rabbitmq-setup
+endif
+	docker compose up -d $(ALL_SERVICES)
+
+containers-down:
+	docker compose down
+
+# Удобные алиасы
+up: containers-up
+down: containers-down
+
+.PHONY: containers-up containers-down up down
+
 # DOCKER
 -include .env
 # Настройки по умолчанию, можно переопределять через env
@@ -333,6 +362,8 @@ docker-login:
 	docker login $(REGISTRY)
 
 docker-tests-up:
+	docker compose -f docker-compose.tests.yaml --profile init run --rm setup-vault
+	docker compose -f docker-compose.tests.yaml --profile init run --rm rabbitmq-setup
 	docker compose -f docker-compose.tests.yaml up --build --abort-on-container-exit --exit-code-from pytests
 
 docker-tests-down:

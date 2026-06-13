@@ -30,6 +30,12 @@ type LoginRequest struct {
 	Scope        Scope     `json:"scope"`         // опциональный параметр. Если не передан - использовать все scopes из service_clients.scopes; если передан — разбить по пробелу, проверить, что каждый scope содержится в service_clients.scopes; если нет — ошибка.
 }
 
+// IsEmpty проверяет, является ли запрос пустым.
+// Если grant_type, client_id и client_secret одновременно пустые, то запрос считается пустым.
+func (r LoginRequest) IsEmpty() bool {
+	return r.GrantType == "" && r.ClientID == "" && r.ClientSecret == "" && r.Scope == ""
+}
+
 // TokenType тип токена.
 type TokenType string
 

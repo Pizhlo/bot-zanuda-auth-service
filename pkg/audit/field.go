@@ -2,12 +2,12 @@ package audit
 
 import (
 	"auth-service/pkg/audit/internal"
+	"fmt"
 	"time"
 )
 
 type fieldID internal.FieldID
 
-//go:generate stringer -type=fieldID -trimprefix=field -output=field_id_string.go
 const (
 	_                fieldID = iota
 	fieldCurrentTime         // время возникновения ошибки
@@ -28,6 +28,100 @@ const (
 	fieldStatus              // статус операции (started, completed, canceled, failed)
 )
 
+// MarshalText реализует [encoding.TextMarshaler] для fieldID.
+func (f fieldID) MarshalText() (text []byte, err error) {
+	return []byte(f.String()), nil // используем stringer!
+}
+
+// String реализует [fmt.Stringer] для fieldID.
+// Возвращает строковое представление fieldID в формате snake_case.
+//
+//nolint:goconst,cyclop // нет смысла выводить в константы строковые значения; много кейсов из-за множества значений.
+func (f fieldID) String() string {
+	switch f {
+	case fieldCurrentTime:
+		return "current_time"
+	case fieldServiceName:
+		return "service_name"
+	case fieldLevel:
+		return "level"
+	case fieldMessage:
+		return "message"
+	case fieldErrorCode:
+		return "error_code"
+	case fieldTraceID:
+		return "trace_id"
+	case fieldRequestID:
+		return "request_id"
+	case fieldUserID:
+		return "user_id"
+	case fieldStackTrace:
+		return "stack_trace"
+	case fieldContext:
+		return "context"
+	case fieldVersion:
+		return "version"
+	case fieldKind:
+		return "kind"
+	case fieldCause:
+		return "cause"
+	case fieldIPAddress:
+		return "ip_address"
+	case fieldOperation:
+		return "operation"
+	case fieldStatus:
+		return "status"
+	default:
+		return "unknown"
+	}
+}
+
+// UnmarshalText реализует [encoding.TextUnmarshaler] для fieldID.
+//
+//nolint:cyclop // много кейсов из-за множества значений
+func (f *fieldID) UnmarshalText(text []byte) error {
+	s := string(text)
+	// Обратный маппинг из string → fieldID
+	switch s {
+	case "current_time":
+		*f = fieldCurrentTime
+	case "service_name":
+		*f = fieldServiceName
+	case "level":
+		*f = fieldLevel
+	case "message":
+		*f = fieldMessage
+	case "error_code":
+		*f = fieldErrorCode
+	case "trace_id":
+		*f = fieldTraceID
+	case "request_id":
+		*f = fieldRequestID
+	case "user_id":
+		*f = fieldUserID
+	case "stack_trace":
+		*f = fieldStackTrace
+	case "context":
+		*f = fieldContext
+	case "version":
+		*f = fieldVersion
+	case "kind":
+		*f = fieldKind
+	case "cause":
+		*f = fieldCause
+	case "ip_address":
+		*f = fieldIPAddress
+	case "operation":
+		*f = fieldOperation
+	case "status":
+		*f = fieldStatus
+	default:
+		return fmt.Errorf("unknown fieldID: %s", s)
+	}
+
+	return nil
+}
+
 // currentTime создает новое поле текущего времени.
 func currentTime() internal.Field {
 	return internal.NewField(fieldCurrentTime, time.Now())
@@ -39,8 +133,6 @@ func ServiceName(serviceName string) internal.Field {
 }
 
 // ErrorLevel - уровень ошибки (debug, info, error, etc).
-//
-//go:generate stringer -type=ErrorLevel -trimprefix=Err -output=error_level_string.go
 type ErrorLevel int
 
 // ErrorLevel - уровень ошибки.
@@ -58,6 +150,54 @@ const (
 	// ErrLevelPanic - уровень ошибки: panic.
 	ErrLevelPanic
 )
+
+// MarshalText реализует [encoding.TextMarshaler] для ErrorLevel.
+func (e ErrorLevel) MarshalText() ([]byte, error) {
+	return []byte(e.String()), nil
+}
+
+// String реализует [fmt.Stringer] для ErrorLevel.
+func (e ErrorLevel) String() string {
+	switch e {
+	case ErrLevelDebug:
+		return "debug"
+	case ErrLevelInfo:
+		return "info"
+	case ErrLevelWarn:
+		return "warn"
+	case ErrLevelError:
+		return "error"
+	case ErrLevelFatal:
+		return "fatal"
+	case ErrLevelPanic:
+		return "panic"
+	default:
+		return "unknown"
+	}
+}
+
+// UnmarshalText реализует [encoding.TextUnmarshaler] для ErrorLevel.
+func (e *ErrorLevel) UnmarshalText(text []byte) error {
+	s := string(text)
+	switch s {
+	case "debug":
+		*e = ErrLevelDebug
+	case "info":
+		*e = ErrLevelInfo
+	case "warn":
+		*e = ErrLevelWarn
+	case "error":
+		*e = ErrLevelError
+	case "fatal":
+		*e = ErrLevelFatal
+	case "panic":
+		*e = ErrLevelPanic
+	default:
+		return fmt.Errorf("unknown ErrorLevel: %s", string(text))
+	}
+
+	return nil
+}
 
 // Level создает новое поле уровня ошибки.
 func Level(level ErrorLevel) internal.Field {
@@ -94,6 +234,8 @@ const (
 	ErrCodeVaultSecretNotFound ErrorCode = "VAULT_SECRET_NOT_FOUND"
 	// ErrCodeInvalidGrantType - код ошибки для случая, когда grant type неверный.
 	ErrCodeInvalidGrantType ErrorCode = "INVALID_GRANT_TYPE"
+	// ErrCodeEmptyLoginRequest - код ошибки для случая, когда запрос на авторизацию пуст.
+	ErrCodeEmptyLoginRequest ErrorCode = "EMPTY_LOGIN_REQUEST"
 	// ErrCodeInvalidScope - код ошибки для случая, когда scope неверный.
 	ErrCodeInvalidScope ErrorCode = "INVALID_SCOPE"
 	// ErrCodeTokenGenerationFailed - код ошибки для случая, когда токен не может быть сгенерирован.
@@ -169,7 +311,6 @@ func version(version string) internal.Field {
 // Kind - тип ошибки.
 type Kind int
 
-//go:generate stringer -type=Kind -trimprefix=Kind -output=kind_string.go
 const (
 	// KindValidation - тип ошибки: validation.
 	KindValidation Kind = iota + 1
@@ -182,6 +323,50 @@ const (
 	// KindInternal - тип ошибки: internal. Внутренние ошибки - это ошибки, связанные с внутренней логикой.
 	KindInternal Kind = iota + 1
 )
+
+// MarshalText реализует [encoding.TextMarshaler] для Kind.
+func (k Kind) MarshalText() ([]byte, error) {
+	return []byte(k.String()), nil
+}
+
+// String реализует [fmt.Stringer] для Kind.
+func (k Kind) String() string {
+	switch k {
+	case KindValidation:
+		return "validation"
+	case KindDomain:
+		return "domain"
+	case KindInfra:
+		return "infra"
+	case KindExternal:
+		return "external"
+	case KindInternal:
+		return "internal"
+	default:
+		return "unknown"
+	}
+}
+
+// UnmarshalText реализует [encoding.TextUnmarshaler] для Kind.
+func (k *Kind) UnmarshalText(text []byte) error {
+	s := string(text)
+	switch s {
+	case "validation":
+		*k = KindValidation
+	case "domain":
+		*k = KindDomain
+	case "infra":
+		*k = KindInfra
+	case "external":
+		*k = KindExternal
+	case "internal":
+		*k = KindInternal
+	default:
+		return fmt.Errorf("unknown Kind: %s", s)
+	}
+
+	return nil
+}
 
 // KindField создает новое поле типа ошибки.
 // Типы ошибок: validation, domain, infra, external, internal.
@@ -196,7 +381,6 @@ func cause(cause error) internal.Field {
 // Status - статус операции (started, completed, canceled, failed).
 type Status int
 
-//go:generate stringer -type=Status -trimprefix=Status -output=status_string.go
 const (
 	// StatusStarted - операция только началась.
 	StatusStarted Status = iota + 1
@@ -211,4 +395,44 @@ const (
 // StatusField создает новое поле статуса операции.
 func StatusField(status Status) internal.Field {
 	return internal.NewField(fieldStatus, status)
+}
+
+// MarshalText реализует [encoding.TextMarshaler] для Status.
+func (s Status) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
+// String реализует [fmt.Stringer] для Status.
+func (s Status) String() string {
+	switch s {
+	case StatusStarted:
+		return "started"
+	case StatusCompleted:
+		return "completed"
+	case StatusCanceled:
+		return "canceled"
+	case StatusFailed:
+		return "failed"
+	default:
+		return "unknown"
+	}
+}
+
+// UnmarshalText реализует [encoding.TextUnmarshaler] для Status.
+func (s *Status) UnmarshalText(text []byte) error {
+	sStr := string(text)
+	switch sStr {
+	case "started":
+		*s = StatusStarted
+	case "completed":
+		*s = StatusCompleted
+	case "canceled":
+		*s = StatusCanceled
+	case "failed":
+		*s = StatusFailed
+	default:
+		return fmt.Errorf("unknown Status: %s", sStr)
+	}
+
+	return nil
 }

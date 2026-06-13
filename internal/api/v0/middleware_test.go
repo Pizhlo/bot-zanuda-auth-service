@@ -163,22 +163,22 @@ func TestConnectionHook(t *testing.T) {
 		stash := ConnectionHook(ctx, audit.Stash{})
 		values := stashFieldsByName(stash)
 
-		require.Equal(t, "trace-1", values["TraceID"])
-		require.Equal(t, "req-1", values["RequestID"])
+		require.Equal(t, "trace-1", values["trace_id"])
+		require.Equal(t, "req-1", values["request_id"])
 		require.Equal(t, audit.EventContext{
 			"ip_address": "127.0.0.1",
 			"user_agent": "curl/8.0",
 			"user_id":    "42",
-		}, values["Context"])
+		}, values["context"])
 	})
 
-	t.Run("adds empty context when values are missing", func(t *testing.T) {
+	t.Run("does not add context when values are missing", func(t *testing.T) {
 		t.Parallel()
 
 		stash := ConnectionHook(context.Background(), audit.Stash{})
 		values := stashFieldsByName(stash)
 
-		require.Empty(t, values["Context"])
+		require.NotContains(t, values, "context")
 	})
 }
 
