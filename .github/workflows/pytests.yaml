@@ -37,6 +37,12 @@ jobs:
 
           AUTH_SERVICE_PORT=${{ secrets.AUTH_SERVICE_PORT }}
 
+          POSTGRES_USER_FGA=${{ secrets.POSTGRES_USER_FGA }}
+          POSTGRES_PASSWORD_FGA=${{ secrets.POSTGRES_PASSWORD_FGA }}
+          POSTGRES_DB_FGA=${{ secrets.POSTGRES_DB_FGA }}
+          POSTGRES_PORT_FGA=${{ secrets.POSTGRES_PORT_FGA }}
+          POSTGRES_HOST_FGA=${{ secrets.POSTGRES_HOST_FGA }}
+
           IMAGE_NAME=${{ secrets.IMAGE_NAME }}
           EOF
 
@@ -86,7 +92,8 @@ jobs:
       - name: Prepare Containers for Pytests
         run: >
           docker compose -f docker-compose.tests.yaml --profile init run --rm setup-vault &&
-          docker compose -f docker-compose.tests.yaml --profile init run --rm rabbitmq-setup
+          docker compose -f docker-compose.tests.yaml --profile init run --rm rabbitmq-setup &&
+          docker compose -f docker-compose.tests.yaml --profile init run --rm fga-migrate
 
       - name: Run Redis and Auth Service
         run: docker compose -f docker-compose.tests.yaml up -d redis auth-service
