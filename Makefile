@@ -372,4 +372,7 @@ docker-tests-up:
 docker-tests-down:
 	docker compose -f docker-compose.tests.yaml down --remove-orphans
 
-.PHONY: docker-tests-up docker-tests-down
+docker-tests:
+	@$(MAKE) docker-tests-up && $(MAKE) docker-tests-down
+
+.PHONY: docker-tests-up docker-tests-down docker-tests

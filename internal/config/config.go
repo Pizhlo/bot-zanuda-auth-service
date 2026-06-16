@@ -23,6 +23,16 @@ type Config struct {
 	Policy   Policy      `yaml:"policy" validate:"required"`
 	Audit    AuditConfig `yaml:"audit" validate:"required"`
 	RabbitMQ RabbitMQ    `yaml:"rabbitmq"`
+	OpenFGA  OpenFGA     `yaml:"openfga"`
+}
+
+// OpenFGA - конфигурация OpenFGA.
+type OpenFGA struct {
+	APIURL             string `yaml:"api_url" validate:"required,url"`         // URL для API OpenFGA
+	AuthorizationModel string `yaml:"authorization_model" validate:"required"` // путь к файлу с моделью авторизации
+	StoreID            string `yaml:"store_id" validate:"omitempty"`           // ID store; если пусто — ищем или создаём по store_name
+	StoreName          string `yaml:"store_name" validate:"omitempty"`         // имя store для поиска или создания
+	ApplyModelOnStart  bool   `yaml:"apply_model_on_start"`                    // применить модель при старте (новая версия)
 }
 
 // Auth - данные для работы Auth-сервиса.
@@ -155,7 +165,19 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: error validate redis: %w", err)
 	}
 
+	if err := cfg.validateOpenFGAConfig(); err != nil {
+		return nil, fmt.Errorf("config: error validate openfga: %w", err)
+	}
+
 	return cfg, nil
+}
+
+func (cfg *Config) validateOpenFGAConfig() error {
+	if len(strings.TrimSpace(cfg.OpenFGA.StoreID)) == 0 && len(strings.TrimSpace(cfg.OpenFGA.StoreName)) == 0 {
+		return fmt.Errorf("store_id or store_name is required")
+	}
+
+	return nil
 }
 
 func validateRabbitMQConfig(cfg *RabbitMQ) error {

@@ -4,6 +4,7 @@ import (
 	"auth-service/docs" // swagger docs
 	handlerV0 "auth-service/internal/api/v0"
 	"auth-service/internal/config"
+	"auth-service/internal/fga"
 	"auth-service/internal/server"
 	"auth-service/internal/service/auth"
 	"auth-service/internal/service/enforcer"
@@ -78,16 +79,16 @@ func main() {
 		logrus.WithError(err).Fatal("failed to connect to vault")
 	}
 
-	defer butler.stop(ctx, vaultClient)
+	defer butler.stop(notifyCtx, vaultClient)
 
-	repo := initPostgresStorage(ctx, config.Postgres)
-	if err := repo.Run(ctx); err != nil {
+	repo := initPostgresStorage(notifyCtx, config.Postgres)
+	if err := repo.Run(notifyCtx); err != nil {
 		logrus.WithFields(logrus.Fields{
 			"db_name": config.Postgres.DBName,
 		}).WithError(err).Fatal("unable to connect postgres")
 	}
 
-	defer butler.stop(ctx, repo)
+	defer butler.stop(notifyCtx, repo)
 
 	var (
 		rabbitMQ *rabbitmq.Client
@@ -101,12 +102,19 @@ func main() {
 			logrus.WithError(err).Fatal("failed to connect to rabbitmq")
 		}
 
-		defer butler.stop(ctx, rabbitMQ)
+		defer butler.stop(notifyCtx, rabbitMQ)
 
 		sender = initSender(config.Audit, rabbitMQ)
 	}
 
 	auditor := initAuditor(config.Audit, sender)
+
+	fga := initFGAClient(config.OpenFGA)
+	if err := fga.Connect(notifyCtx); err != nil {
+		logrus.WithError(err).Fatal("failed to connect to fga")
+	}
+
+	defer butler.stop(notifyCtx, fga)
 
 	authSvc := initAuthService(vaultClient, config.Auth, repo, auditor)
 
@@ -115,8 +123,8 @@ func main() {
 
 	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker, auditor)
 
-	redis := initRedisStorage(ctx, config.Redis)
-	defer butler.stop(ctx, redis)
+	redis := initRedisStorage(notifyCtx, config.Redis)
+	defer butler.stop(notifyCtx, redis)
 
 	userSvc := initUserService(repo, redis, config.Auth, auditor)
 
@@ -378,6 +386,23 @@ func initSender(cfg config.AuditConfig, rabbitMQ *rabbitmq.Client) audit.Sender 
 	return start(audit.NewSender(
 		audit.WithClient(rabbitMQ),
 		audit.WithTopic(cfg.Topic),
+	))
+}
+
+func initFGAClient(cfg config.OpenFGA) *fga.Client {
+	logrus.WithFields(logrus.Fields{
+		"api_url":              cfg.APIURL,
+		"store_id":             cfg.StoreID,
+		"store_name":           cfg.StoreName,
+		"apply_model_on_start": cfg.ApplyModelOnStart,
+	}).Info("initializing openFGA client")
+
+	return start(fga.NewClient(
+		fga.WithAPIURL(cfg.APIURL),
+		fga.WithAuthorizationModel(cfg.AuthorizationModel),
+		fga.WithStoreID(cfg.StoreID),
+		fga.WithStoreName(cfg.StoreName),
+		fga.WithApplyModelOnStart(cfg.ApplyModelOnStart),
 	))
 }
 

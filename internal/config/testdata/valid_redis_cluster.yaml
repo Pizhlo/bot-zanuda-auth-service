@@ -7,6 +7,14 @@ server:
 policy:
   config: casbin_model.conf
 
+# fga - модуль для работы с OpenFGA.
+openfga:
+  api_url: "http://localhost:1234"
+  authorization_model: "testpath/testfile.fga"
+  store_name: "notes-bot" # имя store из docker-compose fga-setup
+  # store_id: ""          # можно указать явно, если store уже создан
+  apply_model_on_start: false # true — применить модель при каждом старте
+
 auth:
   update_key_interval: 1h
   secret_key: your-key

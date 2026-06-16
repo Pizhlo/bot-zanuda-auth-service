@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:funlen,dupl // длинный тест; похожие тест-кейсы
+//nolint:funlen // длинный тест
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
 
@@ -70,6 +70,12 @@ func TestLoadConfig(t *testing.T) {
 					InsertTimeout: 5 * time.Second,
 					ReadTimeout:   5 * time.Second,
 				},
+				OpenFGA: OpenFGA{
+					APIURL:             "http://localhost:1234",
+					AuthorizationModel: "testpath/testfile.fga",
+					StoreName:          "notes-bot",
+					ApplyModelOnStart:  false,
+				},
 				Auth: Auth{
 					SecretKey:         "your-key",
 					UpdateKeyInterval: 1 * time.Hour,
@@ -91,6 +97,12 @@ func TestLoadConfig(t *testing.T) {
 				Server: Server{
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
+				},
+				OpenFGA: OpenFGA{
+					APIURL:             "http://localhost:1234",
+					AuthorizationModel: "testpath/testfile.fga",
+					StoreName:          "notes-bot",
+					ApplyModelOnStart:  false,
 				},
 				Audit: AuditConfig{
 					BrokerEnabled: false,
@@ -157,6 +169,12 @@ func TestLoadConfig(t *testing.T) {
 				Server: Server{
 					Port:            8080,
 					ShutdownTimeout: 100 * time.Millisecond,
+				},
+				OpenFGA: OpenFGA{
+					APIURL:             "http://localhost:1234",
+					AuthorizationModel: "testpath/testfile.fga",
+					StoreName:          "notes-bot",
+					ApplyModelOnStart:  false,
 				},
 				Audit: AuditConfig{
 					BrokerEnabled: true,
@@ -252,6 +270,14 @@ func TestLoadConfig(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "error validate rabbitmq")
+			},
+		},
+		{
+			name:       "error: openfga config invalid",
+			configFile: "testdata/invalid_openfga.yaml",
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "error validate openfga")
 			},
 		},
 		{
@@ -579,6 +605,86 @@ func TestValidateRabbitMQConfig(t *testing.T) {
 			t.Parallel()
 
 			err := validateRabbitMQConfig(&tt.cfg)
+			tt.wantErr(t, err)
+		})
+	}
+}
+
+//nolint:funlen // длинный тест
+func TestValidateOpenFGAConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		cfg     *Config
+		wantErr require.ErrorAssertionFunc
+	}{
+		{
+			name: "valid config",
+			cfg: &Config{
+				OpenFGA: OpenFGA{
+					StoreName: "notes-bot",
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "valid config: store name is empty",
+			cfg: &Config{
+				OpenFGA: OpenFGA{
+					StoreName: "",
+					StoreID:   "123",
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "valid config: store id is empty",
+			cfg: &Config{
+				OpenFGA: OpenFGA{
+					StoreName: "notes-bot",
+					StoreID:   "",
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "invalid config: store name and store id are empty",
+			cfg: &Config{
+				OpenFGA: OpenFGA{
+					StoreName: "",
+					StoreID:   "",
+				},
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				t.Helper()
+
+				require.Error(tt, err)
+				require.ErrorContains(tt, err, "store_id or store_name is required")
+			},
+		},
+		{
+			name: "invalid config: store id and store name are spaces only",
+			cfg: &Config{
+				OpenFGA: OpenFGA{
+					StoreName: "   ",
+					StoreID:   "   ",
+				},
+			},
+			wantErr: func(tt require.TestingT, err error, i ...interface{}) {
+				t.Helper()
+
+				require.Error(tt, err)
+				require.ErrorContains(tt, err, "store_id or store_name is required")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.cfg.validateOpenFGAConfig()
 			tt.wantErr(t, err)
 		})
 	}
