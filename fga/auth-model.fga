@@ -1,0 +1,42 @@
+model
+  schema 1.1
+
+type user
+
+type space
+  relations
+    define owner: [user]
+    define admin: [user] or owner
+    define editor: [user] or admin
+    define viewer: [user] or editor
+
+    define can_view: viewer
+    define can_create_note: editor
+    define can_create_reminder: editor
+    define can_manage_members: admin
+    define can_manage_space: owner
+
+type note
+  relations
+    define space: [space]
+    define owner: [user]
+
+    define viewer: owner or can_view from space
+    define editor: owner or can_create_note from space
+
+    define can_view: viewer
+    define can_update: editor
+    define can_delete: owner or can_manage_space from space
+
+type reminder
+  relations
+    define space: [space]
+    define owner: [user]
+
+    define viewer: owner or can_view from space
+    define editor: owner or can_create_reminder from space
+
+    define can_view: viewer
+    define can_update: editor
+    define can_delete: owner or can_manage_space from space
+    define can_stop: owner or editor

@@ -23,7 +23,7 @@ func TestNewButler(t *testing.T) {
 	assert.Equal(t, "abc123def456", butler.BuildInfo.GitCommit)
 }
 
-func TestStart(t *testing.T) {
+func TestButlerStart(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan bool)

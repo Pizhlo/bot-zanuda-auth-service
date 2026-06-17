@@ -307,7 +307,7 @@ testdata-down:
 RABBITMQ ?= true
 
 # Базовые сервисы (всегда)
-BASE_SERVICES := postgres vault redis
+BASE_SERVICES := postgres vault redis open-fga
 
 # Условные сервисы
 ifeq ($(RABBITMQ),true)
@@ -319,6 +319,8 @@ endif
 containers-up:
 	@echo "🚀 Starting services: $(ALL_SERVICES)"
 	docker compose -f docker-compose.yaml --profile init run --rm setup-vault
+	docker compose -f docker-compose.tests.yaml --profile init run --rm fga-migrate
+	docker compose -f docker-compose.yaml up -d postgres-fga open-fga
 ifeq ($(RABBITMQ),true)
 	docker compose -f docker-compose.yaml --profile init run --rm rabbitmq-setup
 endif
@@ -364,9 +366,13 @@ docker-login:
 docker-tests-up:
 	docker compose -f docker-compose.tests.yaml --profile init run --rm setup-vault
 	docker compose -f docker-compose.tests.yaml --profile init run --rm rabbitmq-setup
-	docker compose -f docker-compose.tests.yaml up --build --abort-on-container-exit --exit-code-from pytests
+	docker compose -f docker-compose.tests.yaml --profile init run --rm fga-migrate
+	docker compose -f docker-compose.tests.yaml up --build --abort-on-container-exit --exit-code-from pytests --remove-orphans --force-recreate pytests
 
 docker-tests-down:
-	docker compose -f docker-compose.tests.yaml down
+	docker compose -f docker-compose.tests.yaml down --remove-orphans
 
-.PHONY: docker-tests-up docker-tests-down
+docker-tests:
+	@$(MAKE) docker-tests-up && $(MAKE) docker-tests-down
+
+.PHONY: docker-tests-up docker-tests-down docker-tests

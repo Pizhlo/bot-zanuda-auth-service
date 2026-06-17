@@ -87,6 +87,7 @@ services:
         GIT_COMMIT: "dev"
     volumes:
       - ./config-tests.yaml:/app/config.yaml:ro
+      - ./fga:/app/fga
     depends_on:
         postgres:
           condition: service_healthy
@@ -95,6 +96,8 @@ services:
         vault:
           condition: service_started
         rabbitmq:
+          condition: service_healthy
+        open-fga:
           condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v0/health || exit 1"]
@@ -146,8 +149,70 @@ services:
       - ./scripts/rabbitmq-setup.sh:/setup/rabbitmq-setup.sh:ro
     command: ["sh", "/setup/rabbitmq-setup.sh"]
 
+  postgres-fga:
+    image: postgres:16
+    container_name: auth-service-postgres-fga-tests
+    volumes:
+      - openfga-pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_FGA}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_FGA}
+      POSTGRES_DB: ${POSTGRES_DB_FGA}
+    ports:
+      - "${POSTGRES_PORT_FGA:-5433}:5432"
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER_FGA} -d ${POSTGRES_DB_FGA}
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  fga-migrate: # миграции схемы БД OpenFGA (обязательны перед первым запуском)
+    image: openfga/openfga
+    container_name: auth-service-fga-migrate-tests
+    restart: "no"
+    profiles:
+      - init
+    command:
+      - migrate
+      - --datastore-engine=postgres
+      - --datastore-uri=postgres://${POSTGRES_USER_FGA}:${POSTGRES_PASSWORD_FGA}@postgres-fga:5432/${POSTGRES_DB_FGA}?sslmode=disable
+    depends_on:
+      postgres-fga:
+        condition: service_healthy
+
+  open-fga: # OpenFGA для управления ролями и разрешениями
+    image: openfga/openfga
+    container_name: auth-service-openfga-tests
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER_FGA}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_FGA}
+      POSTGRES_DB: ${POSTGRES_DB_FGA}
+    ports:
+      - "8081:8081"
+      - "8082:8082"
+    volumes:
+      - openfga-data:/data
+    command:
+      - run
+      - --datastore-engine=postgres
+      - --datastore-uri=postgres://${POSTGRES_USER_FGA}:${POSTGRES_PASSWORD_FGA}@postgres-fga:5432/${POSTGRES_DB_FGA}?sslmode=disable
+      - --grpc-addr=0.0.0.0:8082
+      - --http-addr=0.0.0.0:8081
+    depends_on:
+      postgres-fga:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=localhost:8082"]
+      interval: 5s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
+
 volumes:
   vault_data:
   redis-data:
   pgdata:
   rabbitmq-data:
+  openfga-data:
+  openfga-pgdata:
