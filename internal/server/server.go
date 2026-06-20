@@ -36,6 +36,7 @@ type handler interface {
 	versionHandler
 	notesEditor
 	authHandler
+	resourcesEditor
 }
 
 type versionHandler interface {
@@ -50,6 +51,11 @@ type authHandler interface {
 
 type healthHandler interface {
 	Health(c echo.Context) error
+}
+
+type resourcesEditor interface {
+	// UpdateResource обновляет ресурс.
+	UpdateResource(c echo.Context) error
 }
 
 type notesEditor interface {
@@ -197,6 +203,11 @@ func (s *Server) createRoutes() error {
 	auth.POST("login", s.api.h0.Login)
 
 	auth.POST("notes/filter", s.api.h0.FilterNotes, s.api.middleware.CheckToken)
+
+	// resources
+	resources := apiv0.Group("resources/", s.api.middleware.CheckToken)
+
+	resources.POST("update", s.api.h0.UpdateResource)
 
 	s.e = e
 

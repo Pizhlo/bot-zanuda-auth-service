@@ -3,15 +3,23 @@ package fga
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"auth-service/internal/fga/mocks"
+	"auth-service/internal/model"
+	"auth-service/internal/service/fga/mocks"
+	"auth-service/internal/storage"
+	"auth-service/pkg/audit/testaudit"
 
 	openfga "github.com/openfga/go-sdk"
 	openFGAClient "github.com/openfga/go-sdk/client"
@@ -151,8 +159,63 @@ func (s *writeAuthorizationModelRequestStub) GetContext() context.Context {
 	return s.ctx
 }
 
+type writeRequestStub struct {
+	ctx      context.Context
+	response *openFGAClient.ClientWriteResponse
+	err      error
+	body     *openFGAClient.ClientWriteRequest
+	options  *openFGAClient.ClientWriteOptions
+}
+
+func (s *writeRequestStub) Options(options openFGAClient.ClientWriteOptions) openFGAClient.SdkClientWriteRequestInterface {
+	s.options = &options
+	return s
+}
+
+func (s *writeRequestStub) Body(body openFGAClient.ClientWriteRequest) openFGAClient.SdkClientWriteRequestInterface {
+	s.body = &body
+	return s
+}
+
+func (s *writeRequestStub) Execute() (*openFGAClient.ClientWriteResponse, error) {
+	return s.response, s.err
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *writeRequestStub) GetAuthorizationModelIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.AuthorizationModelId
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *writeRequestStub) GetStoreIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.StoreId
+}
+
+func (s *writeRequestStub) GetBody() *openFGAClient.ClientWriteRequest {
+	return s.body
+}
+
+func (s *writeRequestStub) GetOptions() *openFGAClient.ClientWriteOptions {
+	return s.options
+}
+
+func (s *writeRequestStub) GetContext() context.Context {
+	return s.ctx
+}
+
 func TestNewClient(t *testing.T) {
 	t.Parallel()
+
+	auditor := testaudit.NewAuditor(t)
+	userRepo := mocks.NewMockuserRepo(gomock.NewController(t))
 
 	tests := []struct {
 		name    string
@@ -168,6 +231,8 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
+				WithAuditor(auditor),
+				WithUserRepo(userRepo),
 			},
 			want: &Client{
 				apiURL:             "http://localhost:8080",
@@ -175,6 +240,8 @@ func TestNewClient(t *testing.T) {
 				storeID:            "test",
 				storeName:          "test",
 				applyModelOnStart:  true,
+				auditor:            auditor,
+				userRepo:           userRepo,
 			},
 			wantErr: require.NoError,
 		},
@@ -185,6 +252,8 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
+				WithAuditor(auditor),
+				WithUserRepo(userRepo),
 			},
 			want: nil,
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
@@ -199,6 +268,8 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
+				WithAuditor(auditor),
+				WithUserRepo(userRepo),
 			},
 			want: nil,
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
@@ -212,6 +283,8 @@ func TestNewClient(t *testing.T) {
 				WithAuthorizationModel("test"),
 				WithAPIURL("http://localhost:8080"),
 				WithApplyModelOnStart(true),
+				WithAuditor(auditor),
+				WithUserRepo(userRepo),
 			},
 			want: nil,
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
@@ -224,11 +297,43 @@ func TestNewClient(t *testing.T) {
 			opts: []option{
 				WithAuthorizationModel("test"),
 				WithAPIURL("http://localhost:8080"),
+				WithAuditor(auditor),
+				WithUserRepo(userRepo),
 			},
 			want: nil,
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "store id or store name is required")
+			},
+		},
+		{
+			name: "negative case: auditor is required",
+			opts: []option{
+				WithAuthorizationModel("test"),
+				WithAPIURL("http://localhost:8080"),
+				WithStoreID("test"),
+				WithStoreName("test"),
+				WithUserRepo(userRepo),
+			},
+			want: nil,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "auditor is required")
+			},
+		},
+		{
+			name: "negative case: user repo is required",
+			opts: []option{
+				WithAuthorizationModel("test"),
+				WithAPIURL("http://localhost:8080"),
+				WithStoreID("test"),
+				WithStoreName("test"),
+				WithAuditor(auditor),
+			},
+			want: nil,
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "user repo is required")
 			},
 		},
 	}
@@ -345,9 +450,10 @@ func TestFindStoreByName(t *testing.T) {
 			defer ctrl.Finish()
 
 			mockClient := mocks.NewMockSdkClient(ctrl)
+			userRepo := mocks.NewMockuserRepo(ctrl)
 			stub := tt.setupMocks(t, mockClient)
 
-			client := &Client{fgaClient: mockClient}
+			client := &Client{fgaClient: mockClient, auditor: testaudit.NewAuditor(t), userRepo: userRepo}
 
 			got, err := client.findStoreByName(t.Context(), storeName)
 			tt.wantErr(t, err)
@@ -445,11 +551,14 @@ func TestCreateStore(t *testing.T) {
 			defer ctrl.Finish()
 
 			mockClient := mocks.NewMockSdkClient(ctrl)
+			userRepo := mocks.NewMockuserRepo(ctrl)
 			stub := tt.setupMocks(t, mockClient)
 
 			client := &Client{
 				fgaClient: mockClient,
 				storeName: storeName,
+				auditor:   testaudit.NewAuditor(t),
+				userRepo:  userRepo,
 			}
 
 			err := client.createStore(t.Context())
@@ -468,13 +577,14 @@ func TestResolveStore(t *testing.T) {
 	storeID := "test"
 	storeName := "test"
 
-	createClient := func(t *testing.T, client *mocks.MockSdkClient, clientStoreID string) *Client {
+	createClient := func(t *testing.T, client *mocks.MockSdkClient, clientStoreID string, userRepo *mocks.MockuserRepo) *Client {
 		t.Helper()
 
 		return &Client{
 			fgaClient: client,
 			storeID:   clientStoreID,
 			storeName: storeName,
+			userRepo:  userRepo,
 		}
 	}
 
@@ -612,9 +722,11 @@ func TestResolveStore(t *testing.T) {
 			defer ctrl.Finish()
 
 			openFclient := mocks.NewMockSdkClient(ctrl)
+			userRepo := mocks.NewMockuserRepo(ctrl)
+
 			tt.setupMocks(t, openFclient)
 
-			client := createClient(t, openFclient, tt.clientStoreID)
+			client := createClient(t, openFclient, tt.clientStoreID, userRepo)
 
 			err := client.resolveStore(t.Context())
 			tt.wantErr(t, err)
@@ -1258,7 +1370,7 @@ func TestWriteAuthorizationModel(t *testing.T) {
 			mockClient := mocks.NewMockSdkClient(ctrl)
 			stub := tt.setupMocks(t, mockClient)
 
-			client := &Client{fgaClient: mockClient}
+			client := &Client{fgaClient: mockClient, auditor: testaudit.NewAuditor(t)}
 
 			got, err := client.writeAuthorizationModel(t.Context(), body)
 			tt.wantErr(t, err)
@@ -1268,6 +1380,241 @@ func TestWriteAuthorizationModel(t *testing.T) {
 			require.Equal(t, body.SchemaVersion, stub.body.SchemaVersion)
 			require.Len(t, stub.body.TypeDefinitions, 1)
 			require.Equal(t, "user", stub.body.TypeDefinitions[0].Type)
+		})
+	}
+}
+
+func writeValidationError(t *testing.T, code openfga.ErrorCode) error {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+
+		resp := openfga.NewValidationErrorMessageResponse()
+		resp.SetCode(code)
+		resp.SetMessage("validation failed")
+
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
+		ApiUrl: server.URL,
+	})
+	require.NoError(t, err)
+	require.NoError(t, sdkClient.SetStoreId("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
+
+	_, err = sdkClient.Write(t.Context()).Body(openFGAClient.ClientWriteRequest{}).Execute()
+	require.Error(t, err)
+
+	return err
+}
+
+func TestUpdateResource(t *testing.T) {
+	t.Parallel()
+
+	modelID := "model-id"
+	requestID := uuid.New()
+	idempotencyKey := "idempotency-key"
+	noteID := uuid.New()
+	spaceID := uuid.New()
+	ownerID := uuid.New()
+
+	ownerObject := formatObject(model.Resource{ID: ownerID, Type: model.ResourceTypeUser})
+	noteObject := formatObject(model.Resource{ID: noteID, Type: model.ResourceTypeNote})
+	spaceObject := formatObject(model.Resource{ID: spaceID, Type: model.ResourceTypeSpace})
+
+	createNoteRequest := model.UpdateResourceRequest{
+		RequestID:      requestID,
+		IdempotencyKey: idempotencyKey,
+		Resource:       model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+		Operation:      model.OperationCreate,
+		Relations: model.Relation{
+			Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+			Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		req        model.UpdateResourceRequest
+		setupMocks func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub
+		want       model.UpdateResourceResponse
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{
+			name: "positive case: create note",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				stub := &writeRequestStub{
+					ctx:      t.Context(),
+					response: &openFGAClient.ClientWriteResponse{},
+				}
+				client.EXPECT().Write(gomock.Any()).Return(stub)
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return stub
+			},
+			want: model.UpdateResourceResponse{
+				RequestID:      requestID,
+				IdempotencyKey: idempotencyKey,
+				Status:         model.StatusCompleted,
+				Result:         model.ResultApplied,
+				Resource:       createNoteRequest.Resource,
+				WrittenTuples: []model.Tuple{
+					{Subject: ownerObject, Relation: "owner", Resource: noteObject},
+					{Subject: spaceObject, Relation: "space", Resource: noteObject},
+				},
+				DeletedTuples: []model.Tuple{},
+				Meta: model.Meta{
+					AuthModelID: modelID,
+				},
+			},
+			wantErr: require.NoError,
+		},
+		{
+			name: "error case: convert request fails",
+			req: model.UpdateResourceRequest{
+				Resource:  model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation: model.OperationUpdate,
+			},
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "convert request to openfga tuples")
+				require.ErrorContains(t, err, "unknown operation")
+			},
+		},
+		{
+			name: "error case: write tuples fails",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				stub := &writeRequestStub{
+					ctx: t.Context(),
+					err: errors.New("write failed"),
+				}
+				client.EXPECT().Write(gomock.Any()).Return(stub)
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return stub
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "write tuples to openfga")
+				require.ErrorContains(t, err, "write failed")
+			},
+		},
+		{
+			name: "error case: resource already exists or not found",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				stub := &writeRequestStub{
+					ctx: t.Context(),
+					err: writeValidationError(t, openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT),
+				}
+				client.EXPECT().Write(gomock.Any()).Return(stub)
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return stub
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.ErrorIs(t, err, ErrResounceAlreadyExistsOrNotFound)
+			},
+		},
+		{
+			name: "error case: no tuples to write or delete",
+			req: model.UpdateResourceRequest{
+				Resource:  model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation: model.OperationCreate,
+			},
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.ErrorIs(t, err, ErrNoTuplesToWriteOrDelete)
+			},
+		},
+		{
+			name: "error case: get user id by telegram id fails",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).
+					Return(uuid.Nil, storage.ErrNotFound)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorIs(t, err, ErrUserNotFound)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockClient := mocks.NewMockSdkClient(ctrl)
+			userRepo := mocks.NewMockuserRepo(ctrl)
+			stub := tt.setupMocks(t, mockClient, userRepo)
+
+			client := &Client{
+				fgaClient: mockClient,
+				modelID:   modelID,
+				auditor:   testaudit.NewAuditor(t),
+				userRepo:  userRepo,
+			}
+
+			got, err := client.UpdateResource(t.Context(), tt.req)
+			tt.wantErr(t, err)
+			require.Equal(t, tt.want, got)
+
+			if stub == nil {
+				return
+			}
+
+			require.NotNil(t, stub.body)
+			require.Equal(t, []openFGAClient.ClientTupleKey{
+				{
+					User:     ownerObject,
+					Relation: "owner",
+					Object:   noteObject,
+				},
+				{
+					User:     spaceObject,
+					Relation: "space",
+					Object:   noteObject,
+				},
+			}, stub.body.Writes)
+			require.Nil(t, stub.body.Deletes)
+			require.NotNil(t, stub.options)
+			require.NotNil(t, stub.options.AuthorizationModelId)
+			require.Equal(t, modelID, *stub.options.AuthorizationModelId)
 		})
 	}
 }

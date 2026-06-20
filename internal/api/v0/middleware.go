@@ -55,12 +55,12 @@ func NewMiddlewareHandler(opts ...option) (*MiddlewareHandler, error) {
 	return h, nil
 }
 
+const userIDHeader = "X-Telegram-User-Id"
+
 // CheckToken проверяет токен из запроса. Также проверяет хедер X-Telegram-User-Id.
 // Токен должен быть валидным, не просроченным и иметь scope bot.
 func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		const userIDHeader = "X-Telegram-User-Id"
-
 		tokenHeader := c.Request().Header.Get("Authorization")
 
 		ctx := c.Request().Context()

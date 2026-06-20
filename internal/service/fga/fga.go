@@ -1,12 +1,19 @@
 package fga
 
 import (
+	"auth-service/internal/model"
+	"auth-service/internal/service/internal"
+	"auth-service/internal/storage"
+	"auth-service/pkg/audit"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/openfga/language/pkg/go/transformer"
 
 	openfga "github.com/openfga/go-sdk"
@@ -23,6 +30,17 @@ type Client struct {
 	storeName          string
 	modelID            string
 	applyModelOnStart  bool
+	auditor            auditor
+	userRepo           userRepo
+}
+
+type auditor interface {
+	Create(ctx context.Context) audit.Event
+}
+
+//go:generate mockgen -source=fga.go -destination=mocks/user_repo_mock.go -package=mocks userRepo
+type userRepo interface {
+	GetUserIDByTelegramID(ctx context.Context, telegramID string) (uuid.UUID, error)
 }
 
 //go:generate mockgen -destination=mocks/mocks.go -package=mocks github.com/openfga/go-sdk/client SdkClient
@@ -68,6 +86,20 @@ func WithApplyModelOnStart(apply bool) option {
 	}
 }
 
+// WithAuditor устанавливает сервис для логирования.
+func WithAuditor(auditor auditor) option {
+	return func(c *Client) {
+		c.auditor = auditor
+	}
+}
+
+// WithUserRepo устанавливает репозиторий пользователей.
+func WithUserRepo(userRepo userRepo) option {
+	return func(c *Client) {
+		c.userRepo = userRepo
+	}
+}
+
 // NewClient создает новый экземпляр клиента для работы с OpenFGA.
 func NewClient(opts ...option) (*Client, error) {
 	c := &Client{}
@@ -86,6 +118,14 @@ func NewClient(opts ...option) (*Client, error) {
 
 	if c.storeID == "" && c.storeName == "" {
 		return nil, fmt.Errorf("fga: store id or store name is required")
+	}
+
+	if c.auditor == nil {
+		return nil, fmt.Errorf("fga: auditor is required")
+	}
+
+	if c.userRepo == nil {
+		return nil, fmt.Errorf("fga: user repo is required")
 	}
 
 	return c, nil
@@ -308,4 +348,94 @@ func (c *Client) writeAuthorizationModel(ctx context.Context, body openfga.Write
 	}
 
 	return data, nil
+}
+
+// ErrResounceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
+var (
+	ErrResounceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
+	ErrUserNotFound                    = errors.New("user not found")
+)
+
+const (
+	serviceName             = "fga"
+	operationUpdateResource = "update_resource"
+)
+
+// UpdateResource обновляет ресурс в OpenFGA.
+// Если создаваемый ресурс уже существует или удаляемый ресурс не найден, возвращает ошибку ErrResounceAlreadyExistsOrNotFound.
+//
+//nolint:funlen // много строк из-за аудита
+func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceRequest) (model.UpdateResourceResponse, error) {
+	operationUpdateResourceName := fmt.Sprintf("%s.%s", serviceName, operationUpdateResource)
+
+	ctx = internal.WithOperation(ctx, operationUpdateResourceName)
+	ctx = internal.WithServiceName(ctx)
+
+	event := c.auditor.Create(ctx)
+	defer internal.WithPanicRecovery(ctx, event)()
+
+	event.Append(audit.RequestID(req.RequestID.String()))
+
+	userID, err := c.userRepo.GetUserIDByTelegramID(ctx, strconv.Itoa(req.TelegramID))
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			event.WithError(audit.ErrCodeUserNotFound, audit.KindValidation, err)
+			event.Append(audit.Level(audit.ErrLevelError))
+
+			return model.UpdateResourceResponse{}, ErrUserNotFound
+		}
+
+		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		return model.UpdateResourceResponse{}, fmt.Errorf("fga: error getting user id by telegram id: %w", err)
+	}
+
+	ctx = internal.WithUserID(ctx, userID.String())
+
+	fgaRequest, err := toOpenFGAWriteRequest(req)
+	if err != nil {
+		event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		if errors.Is(err, ErrNoTuplesToWriteOrDelete) {
+			return model.UpdateResourceResponse{}, ErrNoTuplesToWriteOrDelete
+		}
+
+		return model.UpdateResourceResponse{}, fmt.Errorf("convert request to openfga tuples: %w", err)
+	}
+
+	writtenTuples, deletedTuples := toModelTuples(fgaRequest.Writes, fgaRequest.Deletes)
+
+	_, err = c.fgaClient.Write(ctx).Body(fgaRequest).Options(openFGAClient.ClientWriteOptions{
+		AuthorizationModelId: &c.modelID,
+	}).Execute()
+	if err != nil {
+		if fgaErr, ok := err.(openfga.FgaApiValidationError); ok {
+			if code := fgaErr.ResponseCode(); code == openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT {
+				event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
+				event.Append(audit.Level(audit.ErrLevelError))
+
+				return model.UpdateResourceResponse{}, ErrResounceAlreadyExistsOrNotFound
+			}
+		}
+
+		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		return model.UpdateResourceResponse{}, fmt.Errorf("write tuples to openfga: %w", err)
+	}
+
+	return model.UpdateResourceResponse{
+		RequestID:      req.RequestID,
+		IdempotencyKey: req.IdempotencyKey,
+		Status:         model.StatusCompleted,
+		Result:         model.ResultApplied,
+		Resource:       req.Resource,
+		WrittenTuples:  writtenTuples,
+		DeletedTuples:  deletedTuples,
+		Meta: model.Meta{
+			AuthModelID: c.modelID,
+		},
+	}, nil
 }

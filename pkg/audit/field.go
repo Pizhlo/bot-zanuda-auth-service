@@ -244,6 +244,12 @@ const (
 	ErrCodeUserNotFound ErrorCode = "USER_NOT_FOUND"
 	// ErrCodePanic - код ошибки для случая, когда произошла паника.
 	ErrCodePanic ErrorCode = "PANIC"
+	// ErrCodeWriteFailedDueToInvalidInput - код ошибки для случая, когда write failed due to invalid input.
+	ErrCodeWriteFailedDueToInvalidInput ErrorCode = "WRITE_FAILED_DUE_TO_INVALID_INPUT"
+	// ErrCodeResourceAlreadyExistsOrNotFound - код ошибки для случая, когда ресурс уже существует или не найден.
+	ErrCodeResourceAlreadyExistsOrNotFound ErrorCode = "RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND"
+	ErrNoTuplesToWriteOrDelete             ErrorCode = "NO_TUPLES_TO_WRITE_OR_DELETE"
+	ErrInternalServerError                 ErrorCode = "INTERNAL_SERVER_ERROR"
 )
 
 // ErrorCodeField создает новое поле кода ошибки.

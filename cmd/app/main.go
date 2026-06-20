@@ -95,7 +95,7 @@ func main() {
 
 	auditor := initAuditor(config.Audit, sender)
 
-	fga := initFGAClient(config.OpenFGA)
+	fga := initFGAClient(config.OpenFGA, auditor, repo)
 	if err := fga.Connect(notifyCtx); err != nil {
 		logrus.WithError(err).Fatal("failed to connect to fga")
 	}
@@ -114,9 +114,10 @@ func main() {
 
 	userSvc := initUserService(repo, redis, config.Auth, auditor)
 
+	resourcesHandler := initResourcesHandler(fga)
 	authHandler := initAuthHandler(authSvc)
 	notesHandler := initNotesHandler(politicsSvc, userSvc)
-	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler)
+	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler, resourcesHandler)
 	middlewareHandler := initMiddlewareHandler(authSvc)
 
 	server := initServer(handlerV0, middlewareHandler, config.Server)

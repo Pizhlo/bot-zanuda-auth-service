@@ -17,56 +17,65 @@ import (
 func TestNewHandler(t *testing.T) {
 	t.Parallel()
 
+	type mocksStruct struct {
+		notesHandler     *mocks.MocknotesProcessorHandler
+		authHandler      *mocks.MockauthProcessorHandler
+		resourcesHandler *mocks.MockresourcesProcessorHandler
+	}
+
 	type test struct {
 		name     string
-		opts     func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption
+		opts     func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption
 		wantErr  require.ErrorAssertionFunc
-		makeWant func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler
+		makeWant func(mocks mocksStruct) *Handler
 	}
 
 	tests := []test{
 		{
 			name: "success",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithAuthHandler(authHandler),
-					WithNotesHandler(notesHandler),
+					WithAuthHandler(mocks.authHandler),
+					WithNotesHandler(mocks.notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
+					WithResourcesHandler(mocks.resourcesHandler),
 				}
 			},
 			wantErr: require.NoError,
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				return &Handler{
 					version:    "1.0.0",
 					buildDate:  "2021-01-01",
 					gitCommit:  "1234567890",
 					apiVersion: Version0,
-					notes:      notesHandler,
-					auth:       authHandler,
+					notes:      mocks.notesHandler,
+					auth:       mocks.authHandler,
+					resources:  mocks.resourcesHandler,
 				}
 			},
 		},
 		{
 			name: "version is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithAuthHandler(authHandler),
-					WithNotesHandler(notesHandler),
+					WithAuthHandler(mocks.authHandler),
+					WithNotesHandler(mocks.notesHandler),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
+					WithResourcesHandler(mocks.resourcesHandler),
 				}
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "version is required")
 			},
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				t.Helper()
 
 				return nil
@@ -74,21 +83,22 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "buildDate is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithAuthHandler(authHandler),
-					WithNotesHandler(notesHandler),
+					WithAuthHandler(mocks.authHandler),
+					WithNotesHandler(mocks.notesHandler),
 					WithVersion("1.0.0"),
 					WithGitCommit("1234567890"),
+					WithResourcesHandler(mocks.resourcesHandler),
 				}
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "buildDate is required")
 			},
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				t.Helper()
 
 				return nil
@@ -96,21 +106,22 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "gitCommit is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithAuthHandler(authHandler),
-					WithNotesHandler(notesHandler),
+					WithAuthHandler(mocks.authHandler),
+					WithNotesHandler(mocks.notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
+					WithResourcesHandler(mocks.resourcesHandler),
 				}
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "gitCommit is required")
 			},
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				t.Helper()
 
 				return nil
@@ -118,21 +129,22 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "notes handler is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithAuthHandler(authHandler),
+					WithAuthHandler(mocks.authHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
+					WithResourcesHandler(mocks.resourcesHandler),
 				}
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "notes handler is required")
 			},
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				t.Helper()
 
 				return nil
@@ -140,11 +152,35 @@ func TestNewHandler(t *testing.T) {
 		},
 		{
 			name: "auth handler is required",
-			opts: func(t *testing.T, ctrl *gomock.Controller, notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) []handlerOption {
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
 				t.Helper()
 
 				return []handlerOption{
-					WithNotesHandler(notesHandler),
+					WithNotesHandler(mocks.notesHandler),
+					WithVersion("1.0.0"),
+					WithBuildDate("2021-01-01"),
+					WithGitCommit("1234567890"),
+					WithResourcesHandler(mocks.resourcesHandler),
+				}
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "auth handler is required")
+			},
+			makeWant: func(mocks mocksStruct) *Handler {
+				t.Helper()
+
+				return nil
+			},
+		},
+		{
+			name: "resources handler is required",
+			opts: func(t *testing.T, ctrl *gomock.Controller, mocks mocksStruct) []handlerOption {
+				t.Helper()
+
+				return []handlerOption{
+					WithAuthHandler(mocks.authHandler),
+					WithNotesHandler(mocks.notesHandler),
 					WithVersion("1.0.0"),
 					WithBuildDate("2021-01-01"),
 					WithGitCommit("1234567890"),
@@ -152,9 +188,9 @@ func TestNewHandler(t *testing.T) {
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
-				require.ErrorContains(t, err, "auth handler is required")
+				require.ErrorContains(t, err, "resources handler is required")
 			},
-			makeWant: func(notesHandler *mocks.MocknotesProcessorHandler, authHandler *mocks.MockauthProcessorHandler) *Handler {
+			makeWant: func(mocks mocksStruct) *Handler {
 				t.Helper()
 
 				return nil
@@ -169,13 +205,16 @@ func TestNewHandler(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			notesHandler := mocks.NewMocknotesProcessorHandler(ctrl)
-			authHandler := mocks.NewMockauthProcessorHandler(ctrl)
+			mocks := mocksStruct{
+				notesHandler:     mocks.NewMocknotesProcessorHandler(ctrl),
+				authHandler:      mocks.NewMockauthProcessorHandler(ctrl),
+				resourcesHandler: mocks.NewMockresourcesProcessorHandler(ctrl),
+			}
 
-			handler, err := NewHandler(tt.opts(t, ctrl, notesHandler, authHandler)...)
+			handler, err := NewHandler(tt.opts(t, ctrl, mocks)...)
 
 			tt.wantErr(t, err)
-			assert.Equal(t, tt.makeWant(notesHandler, authHandler), handler)
+			assert.Equal(t, tt.makeWant(mocks), handler)
 		})
 	}
 }
@@ -187,7 +226,7 @@ func TestHandler_Version(t *testing.T) {
 	defer ctrl.Finish()
 
 	notesHandler := mocks.NewMocknotesProcessorHandler(ctrl)
-
+	resourcesHandler := mocks.NewMockresourcesProcessorHandler(ctrl)
 	authHandler := mocks.NewMockauthProcessorHandler(ctrl)
 
 	handler, err := NewHandler(
@@ -196,6 +235,7 @@ func TestHandler_Version(t *testing.T) {
 		WithGitCommit("1234567890"),
 		WithNotesHandler(notesHandler),
 		WithAuthHandler(authHandler),
+		WithResourcesHandler(resourcesHandler),
 	)
 
 	require.NoError(t, err)

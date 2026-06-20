@@ -16,8 +16,9 @@ type Handler struct {
 	apiVersion string
 
 	// handlers
-	auth  authProcessorHandler
-	notes notesProcessorHandler
+	auth      authProcessorHandler
+	notes     notesProcessorHandler
+	resources resourcesProcessorHandler
 }
 
 //go:generate mockgen -source=handler.go -destination=mocks/handler_mocks.go -package=mocks authProcessorHandler
@@ -31,6 +32,12 @@ type notesProcessorHandler interface {
 	// FilterNotes фильтрует входящие заметки, возвращая только те, которые доступны пользователю
 	// согласно политикам.
 	FilterNotes(c echo.Context) error
+}
+
+//go:generate mockgen -source=handler.go -destination=mocks/handler_mocks.go -package=mocks resourcesProcessorHandler
+type resourcesProcessorHandler interface {
+	// UpdateResource обновляет ресурс.
+	UpdateResource(c echo.Context) error
 }
 
 type handlerOption func(*Handler)
@@ -70,6 +77,13 @@ func WithNotesHandler(notes notesProcessorHandler) handlerOption {
 	}
 }
 
+// WithResourcesHandler устанавливает хендлер работы с ресурсами.
+func WithResourcesHandler(resources resourcesProcessorHandler) handlerOption {
+	return func(h *Handler) {
+		h.resources = resources
+	}
+}
+
 // NewHandler создает новый хендлер. Автоматически устанавливает версию хендлера на Version0.
 func NewHandler(opts ...handlerOption) (*Handler, error) {
 	h := &Handler{}
@@ -96,6 +110,10 @@ func NewHandler(opts ...handlerOption) (*Handler, error) {
 
 	if h.auth == nil {
 		return nil, errors.New("auth handler is required")
+	}
+
+	if h.resources == nil {
+		return nil, errors.New("resources handler is required")
 	}
 
 	h.apiVersion = Version0
@@ -130,4 +148,9 @@ func (h *Handler) Login(c echo.Context) error {
 // согласно политикам.
 func (h *Handler) FilterNotes(c echo.Context) error {
 	return h.notes.FilterNotes(c)
+}
+
+// UpdateResource обновляет ресурс.
+func (h *Handler) UpdateResource(c echo.Context) error {
+	return h.resources.UpdateResource(c)
 }
