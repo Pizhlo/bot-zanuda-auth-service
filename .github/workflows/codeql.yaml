@@ -1,0 +1,52 @@
+name: CodeQL (Go)
+
+on:
+  push:
+    branches: [ main ]
+    # paths: # только go-файлы
+    #   - '**.go'
+    #   - 'go.mod'
+    #   - 'go.sum'
+  pull_request:
+    branches: [ main ]
+    # paths: # только go-файлы
+    #   - '**.go'
+    #   - 'go.mod'
+    #   - 'go.sum'
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go' ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+
+      # Если проект не тривиальный, лучше явно собрать
+      - name: Build
+        run: |
+          go build ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
