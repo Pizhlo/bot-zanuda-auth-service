@@ -34,7 +34,7 @@ require (
 	github.com/go-openapi/jsonreference v0.19.6 // indirect
 	github.com/go-openapi/spec v0.20.4 // indirect
 	github.com/go-openapi/swag v0.19.15 // indirect
-	github.com/go-pg/pg/v10 v10.12.0 // indirect
+	github.com/go-pg/pg/v10 v10.15.0 // indirect
 	github.com/go-pg/zerochecker v0.2.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
