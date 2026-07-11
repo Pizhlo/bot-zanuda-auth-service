@@ -68,7 +68,7 @@ linters:
         - name: superfluous-else
         - name: var-naming
         - name: error-naming
-        - name: exported
+        # - name: exported # чтобы не требовал комментировать все подряд
         - name: redundant-import-alias
         - name: time-naming
         - name: receiver-naming
