@@ -76,6 +76,20 @@ func (mr *MockhandlerMockRecorder) Login(c interface{}) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Login", reflect.TypeOf((*Mockhandler)(nil).Login), c)
 }
 
+// UpdateResource mocks base method.
+func (m *Mockhandler) UpdateResource(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateResource", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateResource indicates an expected call of UpdateResource.
+func (mr *MockhandlerMockRecorder) UpdateResource(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateResource", reflect.TypeOf((*Mockhandler)(nil).UpdateResource), c)
+}
+
 // Version mocks base method.
 func (m *Mockhandler) Version() string {
 	m.ctrl.T.Helper()
@@ -199,6 +213,43 @@ func (m *MockhealthHandler) Health(c echo.Context) error {
 func (mr *MockhealthHandlerMockRecorder) Health(c interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Health", reflect.TypeOf((*MockhealthHandler)(nil).Health), c)
+}
+
+// MockresourcesEditor is a mock of resourcesEditor interface.
+type MockresourcesEditor struct {
+	ctrl     *gomock.Controller
+	recorder *MockresourcesEditorMockRecorder
+}
+
+// MockresourcesEditorMockRecorder is the mock recorder for MockresourcesEditor.
+type MockresourcesEditorMockRecorder struct {
+	mock *MockresourcesEditor
+}
+
+// NewMockresourcesEditor creates a new mock instance.
+func NewMockresourcesEditor(ctrl *gomock.Controller) *MockresourcesEditor {
+	mock := &MockresourcesEditor{ctrl: ctrl}
+	mock.recorder = &MockresourcesEditorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockresourcesEditor) EXPECT() *MockresourcesEditorMockRecorder {
+	return m.recorder
+}
+
+// UpdateResource mocks base method.
+func (m *MockresourcesEditor) UpdateResource(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateResource", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateResource indicates an expected call of UpdateResource.
+func (mr *MockresourcesEditorMockRecorder) UpdateResource(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateResource", reflect.TypeOf((*MockresourcesEditor)(nil).UpdateResource), c)
 }
 
 // MocknotesEditor is a mock of notesEditor interface.

@@ -2,10 +2,10 @@ package main
 
 import (
 	"auth-service/internal/config"
-	"auth-service/internal/fga"
 	"auth-service/internal/server"
 	"auth-service/internal/service/auth"
 	"auth-service/internal/service/enforcer"
+	"auth-service/internal/service/fga"
 	"auth-service/internal/service/politics"
 	"auth-service/internal/service/politics/access"
 	"auth-service/internal/service/politics/permissions"
@@ -126,7 +126,17 @@ func initNotesHandler(politicsSvc *politics.Service, userSvc *user.Service) *han
 	)
 }
 
-func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *handlerV0.AuthHandler) *handlerV0.Handler {
+func initResourcesHandler(resourceSvc *fga.Client) *handlerV0.ResourceHandler {
+	logrus.Info("initializing resources handler")
+
+	return start(
+		handlerV0.NewResourceHandler(
+			handlerV0.WithResourceService(resourceSvc),
+		),
+	)
+}
+
+func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *handlerV0.AuthHandler, resources *handlerV0.ResourceHandler) *handlerV0.Handler {
 	logrus.WithFields(logrus.Fields{
 		"version":   buildInfo.Version,
 		"buildDate": buildInfo.BuildDate,
@@ -140,6 +150,7 @@ func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *ha
 			handlerV0.WithGitCommit(buildInfo.GitCommit),
 			handlerV0.WithNotesHandler(notes),
 			handlerV0.WithAuthHandler(auth),
+			handlerV0.WithResourcesHandler(resources),
 		),
 	)
 }
@@ -255,7 +266,7 @@ func initSender(cfg config.AuditConfig, rabbitMQ *rabbitmq.Client) audit.Sender 
 	))
 }
 
-func initFGAClient(cfg config.OpenFGA) *fga.Client {
+func initFGAClient(cfg config.OpenFGA, auditor *audit.Auditor, userRepo *repo.Repo) *fga.Client {
 	logrus.WithFields(logrus.Fields{
 		"api_url":              cfg.APIURL,
 		"store_id":             cfg.StoreID,
@@ -269,6 +280,8 @@ func initFGAClient(cfg config.OpenFGA) *fga.Client {
 		fga.WithStoreID(cfg.StoreID),
 		fga.WithStoreName(cfg.StoreName),
 		fga.WithApplyModelOnStart(cfg.ApplyModelOnStart),
+		fga.WithAuditor(auditor),
+		fga.WithUserRepo(userRepo),
 	))
 }
 

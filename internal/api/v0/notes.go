@@ -92,34 +92,31 @@ func (s *NotesHandler) FilterNotes(c echo.Context) error {
 
 	if err := c.Bind(&req); err != nil {
 		logrus.WithError(err).Error("error binding request")
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cannot bind request"})
+		return errResponse(c, http.StatusBadRequest, errors.New("cannot bind request"))
 	}
 
 	if len(req.NoteIDs) == 0 {
-		logrus.Debug("empty note id list")
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty note id list"})
+		return errResponse(c, http.StatusBadRequest, errors.New("empty note id list"))
 	}
 
 	if req.SpaceID == uuid.Nil {
-		logrus.Debug("invalid space id")
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty space id"})
+		return errResponse(c, http.StatusBadRequest, errors.New("empty space id"))
 	}
 
 	userID, ok := userIDFromContext(c.Request().Context())
 	if !ok || userID == "" {
-		logrus.Debug("no user in context")
-		return c.JSON(http.StatusUnauthorized, map[string]string{"error": "no user in context"})
+		return errResponse(c, http.StatusUnauthorized, errors.New("no user in context"))
 	}
 
 	userIDUUID, err := s.userSvc.GetUserIDByTelegramID(c.Request().Context(), userID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "user not found"})
+			return errResponse(c, http.StatusUnauthorized, errors.New("user not found"))
 		}
 
 		logrus.WithError(err).Error("error getting user id by telegram id")
 
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return errResponse(c, http.StatusInternalServerError, errors.New("internal server error"))
 	}
 
 	req.UserID = userIDUUID
@@ -127,12 +124,12 @@ func (s *NotesHandler) FilterNotes(c echo.Context) error {
 	notes, err := s.politicsService.FilterNotes(c.Request().Context(), req)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotMember) {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": service.ErrUserNotMember.Error()})
+			return errResponse(c, http.StatusForbidden, err)
 		}
 
 		logrus.WithError(err).Error("error filtering notes")
 
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
+		return errResponse(c, http.StatusInternalServerError, errors.New("internal server error"))
 	}
 
 	resp := model.FilterNotesResponse{

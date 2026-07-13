@@ -84,3 +84,40 @@ func (mr *MocknotesProcessorHandlerMockRecorder) FilterNotes(c interface{}) *gom
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FilterNotes", reflect.TypeOf((*MocknotesProcessorHandler)(nil).FilterNotes), c)
 }
+
+// MockresourcesProcessorHandler is a mock of resourcesProcessorHandler interface.
+type MockresourcesProcessorHandler struct {
+	ctrl     *gomock.Controller
+	recorder *MockresourcesProcessorHandlerMockRecorder
+}
+
+// MockresourcesProcessorHandlerMockRecorder is the mock recorder for MockresourcesProcessorHandler.
+type MockresourcesProcessorHandlerMockRecorder struct {
+	mock *MockresourcesProcessorHandler
+}
+
+// NewMockresourcesProcessorHandler creates a new mock instance.
+func NewMockresourcesProcessorHandler(ctrl *gomock.Controller) *MockresourcesProcessorHandler {
+	mock := &MockresourcesProcessorHandler{ctrl: ctrl}
+	mock.recorder = &MockresourcesProcessorHandlerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockresourcesProcessorHandler) EXPECT() *MockresourcesProcessorHandlerMockRecorder {
+	return m.recorder
+}
+
+// UpdateResource mocks base method.
+func (m *MockresourcesProcessorHandler) UpdateResource(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateResource", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateResource indicates an expected call of UpdateResource.
+func (mr *MockresourcesProcessorHandlerMockRecorder) UpdateResource(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateResource", reflect.TypeOf((*MockresourcesProcessorHandler)(nil).UpdateResource), c)
+}

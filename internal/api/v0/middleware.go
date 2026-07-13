@@ -6,6 +6,7 @@ import (
 	"auth-service/pkg/audit"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -55,28 +56,30 @@ func NewMiddlewareHandler(opts ...option) (*MiddlewareHandler, error) {
 	return h, nil
 }
 
+const userIDHeader = "X-Telegram-User-Id"
+
 // CheckToken проверяет токен из запроса. Также проверяет хедер X-Telegram-User-Id.
 // Токен должен быть валидным, не просроченным и иметь scope bot.
 func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		const userIDHeader = "X-Telegram-User-Id"
-
 		tokenHeader := c.Request().Header.Get("Authorization")
 
 		ctx := c.Request().Context()
 
 		token, err := s.authService.CheckToken(ctx, tokenHeader)
 		if err != nil {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			logrus.WithError(err).Error("error checking token")
+			return errResponse(c, http.StatusUnauthorized, err)
 		}
 
 		payload, ok := s.authService.GetPayload(token)
 		if !ok {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid token: no payload"})
+			logrus.Error("invalid token: no payload")
+			return errResponse(c, http.StatusUnauthorized, errors.New("invalid token: no payload"))
 		}
 
 		if code, err := s.verifyPayload(c.Request().Context(), payload); err != nil {
-			return c.JSON(code, map[string]string{"error": err.Error()})
+			return errResponse(c, code, err)
 		}
 
 		logrus.WithFields(logrus.Fields{
@@ -90,7 +93,7 @@ func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 
 		userID := c.Request().Header.Get(userIDHeader)
 		if userID == "" {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid request: header 'X-Telegram-User-Id' not found"})
+			return errResponse(c, http.StatusUnauthorized, fmt.Errorf("invalid request: header '%s' not found", userIDHeader))
 		}
 
 		ctx = withUserID(c.Request().Context(), userID)

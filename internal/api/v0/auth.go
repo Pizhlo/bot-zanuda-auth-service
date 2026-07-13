@@ -59,33 +59,31 @@ func (s *AuthHandler) Login(c echo.Context) error {
 
 	resp, err := s.authSerivce.Login(c.Request().Context(), req)
 	if err != nil {
-		logrus.WithError(err).Error("login failed, raw error")
+		logrus.WithError(err).Error("error logging in")
 
 		if errors.Is(err, auth.ErrInvalidGrantType) {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid grant type"})
+			return errResponse(c, http.StatusBadRequest, err)
 		}
 
 		if errors.Is(err, storage.ErrNotFound) {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid client"})
+			return errResponse(c, http.StatusUnauthorized, errors.New("invalid client"))
 		}
 
 		if errors.Is(err, auth.ErrInactiveClient) {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "client is inactive"})
+			return errResponse(c, http.StatusUnauthorized, err)
 		}
 
 		if errors.Is(err, auth.ErrInvalidSecret) {
-			return c.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid client secret"})
+			return errResponse(c, http.StatusUnauthorized, err)
 		}
 
 		if errors.Is(err, auth.ErrInvalidScope) {
-			return c.JSON(http.StatusForbidden, map[string]string{"error": "invalid scope"})
+			return errResponse(c, http.StatusForbidden, err)
 		}
 
 		if errors.Is(err, auth.ErrEmptyLoginRequest) {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty login request"})
+			return errResponse(c, http.StatusBadRequest, err)
 		}
-
-		logrus.WithError(err).Error("error logging in")
 
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "internal server error"})
 	}

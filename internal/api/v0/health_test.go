@@ -30,6 +30,7 @@ func TestHealth(t *testing.T) {
 		WithGitCommit(gitCommit),
 		WithNotesHandler(notesHandler),
 		WithAuthHandler(mocks.NewMockauthProcessorHandler(ctrl)),
+		WithResourcesHandler(mocks.NewMockresourcesProcessorHandler(ctrl)),
 	)
 	require.NoError(t, err)
 
