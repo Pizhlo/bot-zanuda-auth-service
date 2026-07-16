@@ -622,6 +622,19 @@ func TestResponseFromError(t *testing.T) {
 			},
 		},
 		{
+			name:       "parent not allowed",
+			err:        fga.ErrParentNotAllowed,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeParentNotAllowed, fga.ErrParentNotAllowed.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
 			name:       "resource empty",
 			err:        fga.ErrResourceEmpty,
 			wantStatus: http.StatusBadRequest,

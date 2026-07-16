@@ -493,6 +493,8 @@ func (c *Client) validateRequest(req model.UpdateResourceRequest) *DetailedError
 		return c.validateNoteRequest(req)
 	case model.ResourceTypeReminder:
 		return c.validateReminderRequest(req)
+	case model.ResourceTypeSpace:
+		return c.validateSpaceRequest(req)
 	default:
 		return &DetailedError{
 			Err:   fmt.Errorf("invalid resource type: %s", req.Resource.Type),
@@ -507,11 +509,16 @@ var (
 	ErrChangeTypeInvalid = errors.New("change type is invalid")
 	ErrOperationInvalid  = errors.New("operation is invalid")
 	ErrEventTypeInvalid  = errors.New("event type is invalid")
+	ErrParentNotAllowed  = errors.New("parent is not allowed")
 	ErrResourceEmpty     = errors.New("resource is empty")
 	ErrOwnerTypeInvalid  = errors.New("owner type is invalid: must be user")
 	ErrParentTypeInvalid = errors.New("parent type is invalid: must be space")
 )
 
+// validateNoteRequest проверяет запрос на обновление заметки.
+// У заметок должны быть родители и владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение.
+//
 //nolint:dupl // нам нужно оставить разделение на разные функции для расширения
 func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedError {
 	if req.Relations.Owner.IsEmpty() {
@@ -563,6 +570,10 @@ func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedE
 	return nil
 }
 
+// validateReminderRequest проверяет запрос на обновление напоминания.
+// У напоминаний должны быть родители и владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение.
+//
 //nolint:dupl // нам нужно оставить разделение на разные функции для расширения
 func (c *Client) validateReminderRequest(req model.UpdateResourceRequest) *DetailedError {
 	if req.Relations.Owner.IsEmpty() {
@@ -608,6 +619,48 @@ func (c *Client) validateReminderRequest(req model.UpdateResourceRequest) *Detai
 	}
 
 	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixReminder); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSpaceRequest проверяет запрос на обновление пространства.
+// У пространств нет родителей, только владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение прав и состава участников.
+func (c *Client) validateSpaceRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Relations.Owner.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrOwnerRequired,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if !req.Relations.Parent.IsEmpty() {
+		return &DetailedError{
+			Err:     ErrParentNotAllowed,
+			Message: "spaces do not have parents, only owners",
+			Value:   req.Relations.Parent,
+		}
+	}
+
+	spaceAllowedChangeTypes := []model.ChangeType{
+		model.ChangeTypeResourceAdded,
+		model.ChangeTypeResourceRemoved,
+		model.ChangeTypeMembershipChanged,
+		model.ChangeTypeMembershipAdded,
+		model.ChangeTypeMembershipRemoved,
+	}
+
+	if err := checkChangeType(req.ChangeType, spaceAllowedChangeTypes); err != nil {
+		return err
+	}
+
+	if err := checkOperation(req.ChangeType, req.Operation); err != nil {
+		return err
+	}
+
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixSpace); err != nil {
 		return err
 	}
 

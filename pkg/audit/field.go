@@ -252,6 +252,8 @@ const (
 	ErrCodeOperationInvalid ErrorCode = "OPERATION_INVALID"
 	// ErrCodeEventTypeInvalid - код ошибки для случая, когда event type invalid.
 	ErrCodeEventTypeInvalid ErrorCode = "EVENT_TYPE_INVALID"
+	// ErrCodeParentNotAllowed - код ошибки для случая, когда parent not allowed.
+	ErrCodeParentNotAllowed ErrorCode = "PARENT_NOT_ALLOWED"
 	// ErrCodeResourceEmpty - код ошибки для случая, когда resource empty.
 	ErrCodeResourceEmpty ErrorCode = "RESOURCE_EMPTY"
 	// ErrCodeOwnerTypeInvalid - код ошибки для случая, когда owner type invalid.

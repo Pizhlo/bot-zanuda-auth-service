@@ -1713,6 +1713,7 @@ func TestValidateRequest(t *testing.T) {
 	ownerID := uuid.New()
 	spaceID := uuid.New()
 	noteID := uuid.New()
+	reminderID := uuid.New()
 
 	owner := model.Resource{ID: ownerID, Type: model.ResourceTypeUser}
 	parent := model.Resource{ID: spaceID, Type: model.ResourceTypeSpace}
@@ -1734,6 +1735,37 @@ func TestValidateRequest(t *testing.T) {
 				},
 				Context: model.Context{
 					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: reminder",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  owner,
+					Parent: parent,
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixReminder, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: space",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner: owner,
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
 				},
 			},
 			want: nil,
@@ -1778,11 +1810,11 @@ func TestValidateRequest(t *testing.T) {
 			},
 		},
 		{
-			name: "error case: space is not supported",
+			name: "error case: space validation fails",
 			req:  model.UpdateResourceRequest{Resource: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace}},
 			want: &DetailedError{
-				Err:   errors.New("invalid resource type: space"),
-				Value: model.ResourceType(model.ResourceTypeSpace),
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
 			},
 		},
 		{
@@ -2190,6 +2222,199 @@ func TestValidateReminderRequest(t *testing.T) {
 			client := &Client{}
 
 			got := client.validateReminderRequest(tt.req)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestValidateSpaceRequest(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.New()
+	spaceID := uuid.New()
+	parentID := uuid.New()
+
+	validRelations := model.Relation{
+		Owner: model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+	}
+
+	validCreateReq := model.UpdateResourceRequest{
+		Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+		Relations:  validRelations,
+		Context: model.Context{
+			EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
+		},
+	}
+
+	tests := []struct {
+		name string
+		req  model.UpdateResourceRequest
+		want *DetailedError
+	}{
+		{
+			name: "positive case: resource added",
+			req:  validCreateReq,
+			want: nil,
+		},
+		{
+			name: "positive case: resource removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeResourceRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership changed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeMembershipChanged,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationUpdatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership added",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeMembershipAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeMembershipRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "error case: owner is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: parent is not allowed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+					Parent: model.Resource{ID: parentID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrParentNotAllowed,
+				Message: "spaces do not have parents, only owners",
+				Value:   model.Resource{ID: parentID, Type: model.ResourceTypeSpace},
+			},
+		},
+		{
+			name: "error case: invalid change type",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceMoved,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, membership_changed, membership_added, membership_removed`, got `resource_moved`",
+				Value:   model.ChangeTypeResourceMoved,
+			},
+		},
+		{
+			name: "error case: change type and operation mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `create`, got `update`",
+				Value:   model.OperationUpdate,
+			},
+		},
+		{
+			name: "error case: invalid operation",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.Operation("unknown"),
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrOperationInvalid,
+				Message: "operation mismatch: expected one of `create, update, delete`, got `unknown`",
+				Value:   model.Operation("unknown"),
+			},
+		},
+		{
+			name: "error case: event type mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: "NOTE_CREATED",
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `SPACE_CREATED`, got `NOTE_CREATED`",
+				Value:   "NOTE_CREATED",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &Client{}
+
+			got := client.validateSpaceRequest(tt.req)
 			if tt.want == nil {
 				require.Nil(t, got)
 				return

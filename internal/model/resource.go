@@ -182,6 +182,7 @@ const (
 
 	EventTypePrefixNote     = "NOTE"
 	EventTypePrefixReminder = "REMINDER"
+	EventTypePrefixSpace    = "SPACE"
 )
 
 // FormatEventType - форматирует тип события вида "PREFIX_POSTFIX":

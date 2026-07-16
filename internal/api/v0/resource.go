@@ -92,6 +92,7 @@ func (h *ResourceHandler) UpdateResource(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+//nolint:cyclop // много тест-кейсов, но это зависит от количества ошибок.
 func (h *ResourceHandler) responseFromError(c echo.Context, req model.UpdateResourceRequest, resp model.UpdateResourceResponse, err error, detailedError *fga.DetailedError) error {
 	switch {
 	case errors.Is(err, fga.ErrResounceAlreadyExistsOrNotFound):
@@ -120,6 +121,10 @@ func (h *ResourceHandler) responseFromError(c echo.Context, req model.UpdateReso
 
 	case errors.Is(err, fga.ErrEventTypeInvalid):
 		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeEventTypeInvalid, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrParentNotAllowed):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeParentNotAllowed, err.Error(), req.Operation, detailedError), resp.Meta)
 		return c.JSON(http.StatusBadRequest, errResp)
 
 	case errors.Is(err, fga.ErrResourceEmpty):

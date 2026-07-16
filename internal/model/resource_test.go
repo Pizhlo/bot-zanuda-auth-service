@@ -1,3 +1,4 @@
+//nolint:funlen // тестовые функции могут быть любой длины
 package model
 
 import (
@@ -125,6 +126,24 @@ func TestFormatEventType(t *testing.T) {
 			eventTypePrefix:  EventTypePrefixReminder,
 			eventTypePostifx: EventTypeOperationDeletedPostfix,
 			want:             "REMINDER_DELETED",
+		},
+		{
+			name:             "space_created",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationCreatedPostfix,
+			want:             "SPACE_CREATED",
+		},
+		{
+			name:             "space_updated",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationUpdatedPostfix,
+			want:             "SPACE_UPDATED",
+		},
+		{
+			name:             "space_deleted",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationDeletedPostfix,
+			want:             "SPACE_DELETED",
 		},
 	}
 
