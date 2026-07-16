@@ -108,6 +108,24 @@ func TestFormatEventType(t *testing.T) {
 			eventTypePostifx: EventTypeOperationDeletedPostfix,
 			want:             "NOTE_DELETED",
 		},
+		{
+			name:             "reminder_created",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationCreatedPostfix,
+			want:             "REMINDER_CREATED",
+		},
+		{
+			name:             "reminder_updated",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationUpdatedPostfix,
+			want:             "REMINDER_UPDATED",
+		},
+		{
+			name:             "reminder_deleted",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationDeletedPostfix,
+			want:             "REMINDER_DELETED",
+		},
 	}
 
 	for _, tt := range tests {

@@ -180,7 +180,8 @@ const (
 	EventTypeOperationUpdatedPostfix = "UPDATED"
 	EventTypeOperationDeletedPostfix = "DELETED"
 
-	EventTypePrefixNote = "NOTE"
+	EventTypePrefixNote     = "NOTE"
+	EventTypePrefixReminder = "REMINDER"
 )
 
 // FormatEventType - форматирует тип события вида "PREFIX_POSTFIX":

@@ -491,6 +491,8 @@ func (c *Client) validateRequest(req model.UpdateResourceRequest) *DetailedError
 	switch req.Resource.Type {
 	case model.ResourceTypeNote:
 		return c.validateNoteRequest(req)
+	case model.ResourceTypeReminder:
+		return c.validateReminderRequest(req)
 	default:
 		return &DetailedError{
 			Err:   fmt.Errorf("invalid resource type: %s", req.Resource.Type),
@@ -503,12 +505,14 @@ var (
 	ErrOwnerRequired     = errors.New("owner is required")
 	ErrParentRequired    = errors.New("parent is required")
 	ErrChangeTypeInvalid = errors.New("change type is invalid")
+	ErrOperationInvalid  = errors.New("operation is invalid")
 	ErrEventTypeInvalid  = errors.New("event type is invalid")
 	ErrResourceEmpty     = errors.New("resource is empty")
 	ErrOwnerTypeInvalid  = errors.New("owner type is invalid: must be user")
 	ErrParentTypeInvalid = errors.New("parent type is invalid: must be space")
 )
 
+//nolint:dupl // нам нужно оставить разделение на разные функции для расширения
 func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedError {
 	if req.Relations.Owner.IsEmpty() {
 		return &DetailedError{
@@ -552,7 +556,58 @@ func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedE
 		return err
 	}
 
-	if err := checkEventType(req.Operation, req.Context.EventType); err != nil {
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixNote); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+//nolint:dupl // нам нужно оставить разделение на разные функции для расширения
+func (c *Client) validateReminderRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Relations.Owner.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrOwnerRequired,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Owner.Type != model.ResourceTypeUser {
+		return &DetailedError{
+			Err:   ErrOwnerTypeInvalid,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Parent.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrParentRequired,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	if req.Relations.Parent.Type != model.ResourceTypeSpace {
+		return &DetailedError{
+			Err:   ErrParentTypeInvalid,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	reminderAllowedChangeTypes := []model.ChangeType{
+		model.ChangeTypeResourceAdded,
+		model.ChangeTypeResourceRemoved,
+		model.ChangeTypeResourceMoved,
+	}
+
+	if err := checkChangeType(req.ChangeType, reminderAllowedChangeTypes); err != nil {
+		return err
+	}
+
+	if err := checkOperation(req.ChangeType, req.Operation); err != nil {
+		return err
+	}
+
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixReminder); err != nil {
 		return err
 	}
 
@@ -560,6 +615,18 @@ func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedE
 }
 
 func checkOperation(changeType model.ChangeType, originalOperation model.Operation) *DetailedError {
+	switch originalOperation {
+	case model.OperationCreate, model.OperationUpdate, model.OperationDelete:
+	default:
+		expected := []string{string(model.OperationCreate), string(model.OperationUpdate), string(model.OperationDelete)}
+
+		return &DetailedError{
+			Err:     ErrOperationInvalid,
+			Message: fmt.Sprintf("operation mismatch: expected one of `%s`, got `%s`", strings.Join(expected, ", "), originalOperation),
+			Value:   originalOperation,
+		}
+	}
+
 	operation := model.ChangeTypeToOperation[changeType]
 	if operation != originalOperation {
 		return &DetailedError{
@@ -589,8 +656,7 @@ func checkChangeType(changeType model.ChangeType, allowedChangeTypes []model.Cha
 	return nil
 }
 
-func checkEventType(operation model.Operation, originalEventType string) *DetailedError {
-	eventTypePrefix := model.EventTypePrefixNote
+func checkEventType(operation model.Operation, originalEventType string, eventTypePrefix string) *DetailedError {
 	eventTypePostfix := ""
 
 	switch operation {
