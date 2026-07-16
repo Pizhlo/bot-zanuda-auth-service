@@ -170,7 +170,7 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 					Status:       model.StatusError,
 					Result:       model.ResultFailed,
 					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation),
+					ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil),
 					Meta:         model.Meta{},
 				}, actual.errResp)
 			},
@@ -194,7 +194,7 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 					Status:       model.StatusError,
 					Result:       model.ResultFailed,
 					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResounceAlreadyExistsOrNotFound.Error(), updateRequest.Operation),
+					ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResounceAlreadyExistsOrNotFound.Error(), updateRequest.Operation, nil),
 					Meta:         model.Meta{},
 				}, actual.errResp)
 			},
@@ -218,8 +218,45 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 					Status:       model.StatusError,
 					Result:       model.ResultFailed,
 					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrCodeUserNotFound, fga.ErrUserNotFound.Error(), updateRequest.Operation),
+					ErrorMessage: newMessage(audit.ErrCodeUserNotFound, fga.ErrUserNotFound.Error(), updateRequest.Operation, nil),
 					Meta:         model.Meta{},
+				}, actual.errResp)
+			},
+		},
+		{
+			name: "error case: detailed error",
+			body: updateRequest,
+			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
+				t.Helper()
+
+				resourceSvc.EXPECT().
+					UpdateResource(gomock.Any(), gomock.Any()).
+					Return(model.UpdateResourceResponse{}, &fga.DetailedError{
+						Err:     fga.ErrOwnerRequired,
+						Message: "owner is required",
+						Value:   "empty owner",
+					})
+			},
+			checkWant: func(t *testing.T, actual wantResponse) {
+				t.Helper()
+
+				require.Equal(t, http.StatusBadRequest, actual.status)
+				// Err не сериализуется в JSON (json:"-"), поэтому в ответе он nil.
+				require.Equal(t, &errorResponse{
+					RequestID: requestID,
+					Status:    model.StatusError,
+					Result:    model.ResultFailed,
+					Resource:  updateRequest.Resource,
+					ErrorMessage: newMessage(
+						audit.ErrCodeOwnerRequired,
+						fga.ErrOwnerRequired.Error(),
+						updateRequest.Operation,
+						&fga.DetailedError{
+							Message: "owner is required",
+							Value:   "empty owner",
+						},
+					),
+					Meta: model.Meta{},
 				}, actual.errResp)
 			},
 		},
@@ -242,7 +279,7 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 					Status:       model.StatusError,
 					Result:       model.ResultFailed,
 					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrInternalServerError, "internal server error", updateRequest.Operation),
+					ErrorMessage: newMessage(audit.ErrInternalServerError, "internal server error", updateRequest.Operation, nil),
 					Meta:         model.Meta{},
 				}, actual.errResp)
 			},
@@ -447,28 +484,231 @@ func TestResourceHandler_CreateErrorResponse(t *testing.T) {
 		Status:       model.StatusError,
 		Result:       model.ResultFailed,
 		Resource:     updateRequest.Resource,
-		ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation),
+		ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil),
 		Meta:         meta,
 	}
 
 	handler, err := NewResourceHandler(WithResourceService(mocks.NewMockresourceService(gomock.NewController(t))))
 	require.NoError(t, err)
 
-	errResp := handler.createErrorResponse(requestID, model.StatusError, model.ResultFailed, updateRequest.Resource, newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation), meta)
+	errResp := handler.createErrorResponse(requestID, model.StatusError, model.ResultFailed, updateRequest.Resource, newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil), meta)
 
 	require.Equal(t, expectedErrResp, errResp)
+}
+
+func TestResponseFromError(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.New()
+	noteID := uuid.New()
+	meta := model.Meta{AuthModelID: "model-id"}
+
+	req := model.UpdateResourceRequest{
+		RequestID:  requestID,
+		Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+	}
+	resp := model.UpdateResourceResponse{Meta: meta}
+
+	detailedErr := &fga.DetailedError{
+		Err:     fga.ErrOwnerRequired,
+		Message: "owner is required",
+		Value:   "empty owner",
+	}
+	// Err не сериализуется в JSON (json:"-").
+	detailedErrInResponse := &fga.DetailedError{
+		Message: "owner is required",
+		Value:   "empty owner",
+	}
+
+	tests := []struct {
+		name          string
+		err           error
+		detailedError *fga.DetailedError
+		wantStatus    int
+		wantErrResp   errorResponse
+	}{
+		{
+			name:       "resource already exists or not found",
+			err:        fga.ErrResounceAlreadyExistsOrNotFound,
+			wantStatus: http.StatusConflict,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResounceAlreadyExistsOrNotFound.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "no tuples to write or delete",
+			err:        fga.ErrNoTuplesToWriteOrDelete,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "user not found",
+			err:        fga.ErrUserNotFound,
+			wantStatus: http.StatusNotFound,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeUserNotFound, fga.ErrUserNotFound.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:          "owner required with detailed error",
+			err:           fga.ErrOwnerRequired,
+			detailedError: detailedErr,
+			wantStatus:    http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeOwnerRequired, fga.ErrOwnerRequired.Error(), req.Operation, detailedErrInResponse),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "parent required",
+			err:        fga.ErrParentRequired,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeParentRequired, fga.ErrParentRequired.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "change type invalid",
+			err:        fga.ErrChangeTypeInvalid,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeChangeTypeInvalid, fga.ErrChangeTypeInvalid.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "event type invalid",
+			err:        fga.ErrEventTypeInvalid,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeEventTypeInvalid, fga.ErrEventTypeInvalid.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "resource empty",
+			err:        fga.ErrResourceEmpty,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeResourceEmpty, fga.ErrResourceEmpty.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "owner type invalid",
+			err:        fga.ErrOwnerTypeInvalid,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeOwnerTypeInvalid, fga.ErrOwnerTypeInvalid.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "parent type invalid",
+			err:        fga.ErrParentTypeInvalid,
+			wantStatus: http.StatusBadRequest,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrCodeParentTypeInvalid, fga.ErrParentTypeInvalid.Error(), req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+		{
+			name:       "internal server error",
+			err:        errors.New("unexpected"),
+			wantStatus: http.StatusInternalServerError,
+			wantErrResp: errorResponse{
+				RequestID:    requestID,
+				Status:       model.StatusError,
+				Result:       model.ResultFailed,
+				Resource:     req.Resource,
+				ErrorMessage: newMessage(audit.ErrInternalServerError, "internal server error", req.Operation, nil),
+				Meta:         meta,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler, err := NewResourceHandler(WithResourceService(mocks.NewMockresourceService(gomock.NewController(t))))
+			require.NoError(t, err)
+
+			e := echo.New()
+			httpReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(httpReq, rec)
+
+			err = handler.responseFromError(c, req, resp, tt.err, tt.detailedError)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantStatus, rec.Code)
+
+			var got errorResponse
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+			require.Equal(t, tt.wantErrResp, got)
+		})
+	}
 }
 
 func TestNewMessage(t *testing.T) {
 	t.Parallel()
 
-	message := newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), model.OperationCreate)
+	message := newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), model.OperationCreate, nil)
 	require.Equal(t, errorMessage{
 		Code:    audit.ErrNoTuplesToWriteOrDelete,
 		Message: fga.ErrNoTuplesToWriteOrDelete.Error(),
 		Details: struct {
-			Operation model.Operation `json:"operation"`
-		}{Operation: model.OperationCreate},
+			Operation          model.Operation `json:"operation"`
+			*fga.DetailedError `json:"detailed_error"`
+		}{Operation: model.OperationCreate, DetailedError: nil},
 	}, message)
 }
 func TestErrResponse(t *testing.T) {

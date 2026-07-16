@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 )
@@ -26,11 +27,15 @@ type Resource struct {
 	Type ResourceType `json:"type"`
 }
 
+func (r Resource) IsEmpty() bool {
+	return r.ID == uuid.Nil || r.Type == ""
+}
+
 // ParentRelationName возвращает имя relation для связи ресурса с родителем в auth-модели OpenFGA.
 func (r Resource) ParentRelationName() (string, error) {
 	switch r.Type {
 	case ResourceTypeNote, ResourceTypeReminder:
-		return "space", nil
+		return string(ResourceTypeSpace), nil
 	default:
 		return "", fmt.Errorf("resource type %s does not support parent relation", r.Type)
 	}
@@ -65,6 +70,24 @@ const (
 
 // ChangeType - тип изменения ресурса.
 type ChangeType string
+
+// IsOneOf проверяет, является ли тип изменения одним из переданных типов.
+// Используется для проверки, входит ли он в группу разрешенных типов изменения.
+func (c ChangeType) IsOneOf(changeTypes ...ChangeType) bool {
+	return slices.Contains(changeTypes, c)
+}
+
+// ChangeTypeToOperation - преобразует тип изменения в операцию для валидации соответствия [ChangeType] к [Operation].
+//
+//nolint:gochecknoglobals // глобальная константа для преобразования типа изменения в операцию
+var ChangeTypeToOperation = map[ChangeType]Operation{
+	ChangeTypeResourceAdded:     OperationCreate,
+	ChangeTypeResourceRemoved:   OperationDelete,
+	ChangeTypeResourceMoved:     OperationUpdate,
+	ChangeTypeMembershipChanged: OperationUpdate,
+	ChangeTypeMembershipAdded:   OperationCreate,
+	ChangeTypeMembershipRemoved: OperationDelete,
+}
 
 const (
 	// ChangeTypeMembershipChanged - изменение прав участников ресурса.
@@ -149,4 +172,23 @@ type UpdateResourceResponse struct {
 	WrittenTuples  []Tuple   `json:"written_tuples"`
 	DeletedTuples  []Tuple   `json:"deleted_tuples"`
 	Meta           Meta      `json:"meta"`
+}
+
+const (
+	// Постфиксы для типа события операции. Например: NOTE_CREATED, NOTE_UPDATED, NOTE_DELETED.
+	EventTypeOperationCreatedPostfix = "CREATED"
+	EventTypeOperationUpdatedPostfix = "UPDATED"
+	EventTypeOperationDeletedPostfix = "DELETED"
+
+	EventTypePrefixNote = "NOTE"
+)
+
+// FormatEventType - форматирует тип события вида "PREFIX_POSTFIX":
+//
+//	Примеры:
+//		FormatEventType("NOTE", "CREATED") -> "NOTE_CREATED"
+//		FormatEventType("NOTE", "UPDATED") -> "NOTE_UPDATED"
+//		FormatEventType("NOTE", "DELETED") -> "NOTE_DELETED"
+func FormatEventType(eventTypePrefix, eventTypePostifx string) string {
+	return fmt.Sprintf("%s_%s", eventTypePrefix, eventTypePostifx)
 }
