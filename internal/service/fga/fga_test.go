@@ -1,10 +1,11 @@
-//nolint:funlen // тесты
+//nolint:funlen,dupl // тесты
 package fga
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1430,9 +1431,13 @@ func TestUpdateResource(t *testing.T) {
 		IdempotencyKey: idempotencyKey,
 		Resource:       model.Resource{ID: noteID, Type: model.ResourceTypeNote},
 		Operation:      model.OperationCreate,
+		ChangeType:     model.ChangeTypeResourceAdded,
 		Relations: model.Relation{
 			Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
 			Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+		},
+		Context: model.Context{
+			EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
 		},
 	}
 
@@ -1442,6 +1447,7 @@ func TestUpdateResource(t *testing.T) {
 		setupMocks func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub
 		want       model.UpdateResourceResponse
 		wantErr    require.ErrorAssertionFunc
+		checkWrite bool
 	}{
 		{
 			name: "positive case: create note",
@@ -1454,7 +1460,6 @@ func TestUpdateResource(t *testing.T) {
 					response: &openFGAClient.ClientWriteResponse{},
 				}
 				client.EXPECT().Write(gomock.Any()).Return(stub)
-
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return stub
@@ -1474,17 +1479,100 @@ func TestUpdateResource(t *testing.T) {
 					AuthModelID: modelID,
 				},
 			},
-			wantErr: require.NoError,
+			wantErr:    require.NoError,
+			checkWrite: true,
+		},
+		{
+			name: "error case: user not found",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).
+					Return(uuid.Nil, storage.ErrNotFound)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.ErrorIs(t, err, ErrUserNotFound)
+			},
+		},
+		{
+			name: "error case: get user id by telegram id fails",
+			req:  createNoteRequest,
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).
+					Return(uuid.Nil, errors.New("db unavailable"))
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "fga: error getting user id by telegram id")
+				require.ErrorContains(t, err, "db unavailable")
+
+				var detailed *DetailedError
+				require.ErrorAs(t, err, &detailed)
+				require.Equal(t, createNoteRequest.TelegramID, detailed.Value)
+			},
+		},
+		{
+			name: "error case: validate request fails",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.ErrorIs(t, err, ErrOwnerRequired)
+			},
+		},
+		{
+			name: "error case: invalid resource type",
+			req: model.UpdateResourceRequest{
+				Resource: model.Resource{ID: noteID, Type: "invalid"},
+			},
+			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
+				t.Helper()
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				return nil
+			},
+			wantErr: func(t require.TestingT, err error, i ...interface{}) {
+				require.Error(t, err)
+				require.ErrorContains(t, err, "invalid resource type: invalid")
+			},
 		},
 		{
 			name: "error case: convert request fails",
 			req: model.UpdateResourceRequest{
-				Resource:  model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-				Operation: model.OperationUpdate,
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceMoved,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationUpdatedPostfix),
+				},
 			},
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
-
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return nil
@@ -1506,7 +1594,6 @@ func TestUpdateResource(t *testing.T) {
 					err: errors.New("write failed"),
 				}
 				client.EXPECT().Write(gomock.Any()).Return(stub)
-
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return stub
@@ -1516,6 +1603,7 @@ func TestUpdateResource(t *testing.T) {
 				require.ErrorContains(t, err, "write tuples to openfga")
 				require.ErrorContains(t, err, "write failed")
 			},
+			checkWrite: true,
 		},
 		{
 			name: "error case: resource already exists or not found",
@@ -1528,7 +1616,6 @@ func TestUpdateResource(t *testing.T) {
 					err: writeValidationError(t, openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT),
 				}
 				client.EXPECT().Write(gomock.Any()).Return(stub)
-
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return stub
@@ -1536,39 +1623,28 @@ func TestUpdateResource(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.ErrorIs(t, err, ErrResounceAlreadyExistsOrNotFound)
 			},
+			checkWrite: true,
 		},
 		{
-			name: "error case: no tuples to write or delete",
-			req: model.UpdateResourceRequest{
-				Resource:  model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-				Operation: model.OperationCreate,
-			},
-			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
-				t.Helper()
-
-				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
-
-				return nil
-			},
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrNoTuplesToWriteOrDelete)
-			},
-		},
-		{
-			name: "error case: get user id by telegram id fails",
+			name: "error case: fga validation error with other code",
 			req:  createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
-				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).
-					Return(uuid.Nil, storage.ErrNotFound)
+				stub := &writeRequestStub{
+					ctx: t.Context(),
+					err: writeValidationError(t, openfga.ERRORCODE_VALIDATION_ERROR),
+				}
+				client.EXPECT().Write(gomock.Any()).Return(stub)
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
-				return nil
+				return stub
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrUserNotFound)
+				require.ErrorContains(t, err, "write tuples to openfga")
 			},
+			checkWrite: true,
 		},
 	}
 
@@ -1594,10 +1670,11 @@ func TestUpdateResource(t *testing.T) {
 			tt.wantErr(t, err)
 			require.Equal(t, tt.want, got)
 
-			if stub == nil {
+			if !tt.checkWrite {
 				return
 			}
 
+			require.NotNil(t, stub)
 			require.NotNil(t, stub.body)
 			require.Equal(t, []openFGAClient.ClientTupleKey{
 				{
@@ -1615,6 +1692,1029 @@ func TestUpdateResource(t *testing.T) {
 			require.NotNil(t, stub.options)
 			require.NotNil(t, stub.options.AuthorizationModelId)
 			require.Equal(t, modelID, *stub.options.AuthorizationModelId)
+		})
+	}
+}
+
+func TestDetailedError_Error(t *testing.T) {
+	t.Parallel()
+
+	err := &DetailedError{
+		Err:   errors.New("test error"),
+		Value: "test value",
+	}
+
+	require.Equal(t, "test error", err.Error())
+}
+
+func TestValidateRequest(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.New()
+	spaceID := uuid.New()
+	noteID := uuid.New()
+	reminderID := uuid.New()
+
+	owner := model.Resource{ID: ownerID, Type: model.ResourceTypeUser}
+	parent := model.Resource{ID: spaceID, Type: model.ResourceTypeSpace}
+
+	tests := []struct {
+		name string
+		req  model.UpdateResourceRequest
+		want *DetailedError
+	}{
+		{
+			name: "positive case: note",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  owner,
+					Parent: parent,
+				},
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: reminder",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  owner,
+					Parent: parent,
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixReminder, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: space",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner: owner,
+				},
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "error case: resource is empty",
+			req:  model.UpdateResourceRequest{},
+			want: &DetailedError{
+				Err:   ErrResourceEmpty,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: note validation fails",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Parent: parent,
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: invalid resource type",
+			req:  model.UpdateResourceRequest{Resource: model.Resource{ID: uuid.New(), Type: "invalid"}},
+			want: &DetailedError{
+				Err:   errors.New("invalid resource type: invalid"),
+				Value: model.ResourceType("invalid"),
+			},
+		},
+		{
+			name: "error case: reminder validation fails",
+			req:  model.UpdateResourceRequest{Resource: model.Resource{ID: uuid.New(), Type: model.ResourceTypeReminder}},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: space validation fails",
+			req:  model.UpdateResourceRequest{Resource: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace}},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: user is not supported",
+			req:  model.UpdateResourceRequest{Resource: model.Resource{ID: ownerID, Type: model.ResourceTypeUser}},
+			want: &DetailedError{
+				Err:   errors.New("invalid resource type: user"),
+				Value: model.ResourceType(model.ResourceTypeUser),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &Client{}
+
+			err := client.validateRequest(tt.req)
+			if tt.want == nil {
+				require.Nil(t, err)
+				return
+			}
+
+			require.NotNil(t, err)
+			require.Equal(t, tt.want.Message, err.Message)
+			require.Equal(t, tt.want.Value, err.Value)
+			require.EqualError(t, err.Err, tt.want.Err.Error())
+		})
+	}
+}
+
+func TestValidateNoteRequest(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.New()
+	spaceID := uuid.New()
+	noteID := uuid.New()
+
+	validRelations := model.Relation{
+		Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+		Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+	}
+
+	validCreateReq := model.UpdateResourceRequest{
+		Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+		Relations:  validRelations,
+		Context: model.Context{
+			EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+		},
+	}
+
+	tests := []struct {
+		name string
+		req  model.UpdateResourceRequest
+		want *DetailedError
+	}{
+		{
+			name: "positive case: resource added",
+			req:  validCreateReq,
+			want: nil,
+		},
+		{
+			name: "positive case: resource removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeResourceRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: resource moved",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceMoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationUpdatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "error case: owner is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: owner type is invalid",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeSpace},
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerTypeInvalid,
+				Value: model.Resource{ID: ownerID, Type: model.ResourceTypeSpace},
+			},
+		},
+		{
+			name: "error case: parent is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner: model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrParentRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: parent type is invalid",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeUser},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrParentTypeInvalid,
+				Value: model.Resource{ID: spaceID, Type: model.ResourceTypeUser},
+			},
+		},
+		{
+			name: "error case: invalid change type",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeMembershipChanged,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got `membership_changed`",
+				Value:   model.ChangeTypeMembershipChanged,
+			},
+		},
+		{
+			name: "error case: change type and operation mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `create`, got `update`",
+				Value:   model.OperationUpdate,
+			},
+		},
+		{
+			name: "error case: event type mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationUpdatedPostfix),
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `NOTE_CREATED`, got `NOTE_UPDATED`",
+				Value:   "NOTE_UPDATED",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &Client{}
+
+			got := client.validateNoteRequest(tt.req)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestValidateReminderRequest(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.New()
+	spaceID := uuid.New()
+	reminderID := uuid.New()
+
+	validRelations := model.Relation{
+		Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+		Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+	}
+
+	validCreateReq := model.UpdateResourceRequest{
+		Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+		Relations:  validRelations,
+		Context: model.Context{
+			EventType: model.FormatEventType(model.EventTypePrefixReminder, model.EventTypeOperationCreatedPostfix),
+		},
+	}
+
+	tests := []struct {
+		name string
+		req  model.UpdateResourceRequest
+		want *DetailedError
+	}{
+		{
+			name: "positive case: resource added",
+			req:  validCreateReq,
+			want: nil,
+		},
+		{
+			name: "positive case: resource removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeResourceRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixReminder, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: resource moved",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceMoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixReminder, model.EventTypeOperationUpdatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "error case: owner is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: owner type is invalid",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeSpace},
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerTypeInvalid,
+				Value: model.Resource{ID: ownerID, Type: model.ResourceTypeSpace},
+			},
+		},
+		{
+			name: "error case: parent is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner: model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrParentRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: parent type is invalid",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+					Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeUser},
+				},
+			},
+			want: &DetailedError{
+				Err:   ErrParentTypeInvalid,
+				Value: model.Resource{ID: spaceID, Type: model.ResourceTypeUser},
+			},
+		},
+		{
+			name: "error case: invalid change type",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeMembershipChanged,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got `membership_changed`",
+				Value:   model.ChangeTypeMembershipChanged,
+			},
+		},
+		{
+			name: "error case: change type and operation mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `create`, got `update`",
+				Value:   model.OperationUpdate,
+			},
+		},
+		{
+			name: "error case: invalid operation",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.Operation("unknown"),
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrOperationInvalid,
+				Message: "operation mismatch: expected one of `create, update, delete`, got `unknown`",
+				Value:   model.Operation("unknown"),
+			},
+		},
+		{
+			name: "error case: event type mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: model.FormatEventType(model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `REMINDER_CREATED`, got `NOTE_CREATED`",
+				Value:   "NOTE_CREATED",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &Client{}
+
+			got := client.validateReminderRequest(tt.req)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestValidateSpaceRequest(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.New()
+	spaceID := uuid.New()
+	parentID := uuid.New()
+
+	validRelations := model.Relation{
+		Owner: model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+	}
+
+	validCreateReq := model.UpdateResourceRequest{
+		Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+		Relations:  validRelations,
+		Context: model.Context{
+			EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
+		},
+	}
+
+	tests := []struct {
+		name string
+		req  model.UpdateResourceRequest
+		want *DetailedError
+	}{
+		{
+			name: "positive case: resource added",
+			req:  validCreateReq,
+			want: nil,
+		},
+		{
+			name: "positive case: resource removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeResourceRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership changed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeMembershipChanged,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationUpdatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership added",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeMembershipAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "positive case: membership removed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationDelete,
+				ChangeType: model.ChangeTypeMembershipRemoved,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: fmt.Sprintf("%s_%s", model.EventTypePrefixSpace, model.EventTypeOperationDeletedPostfix),
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "error case: owner is required",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+			},
+			want: &DetailedError{
+				Err:   ErrOwnerRequired,
+				Value: model.Resource{},
+			},
+		},
+		{
+			name: "error case: parent is not allowed",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations: model.Relation{
+					Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
+					Parent: model.Resource{ID: parentID, Type: model.ResourceTypeSpace},
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrParentNotAllowed,
+				Message: "spaces do not have parents, only owners",
+				Value:   model.Resource{ID: parentID, Type: model.ResourceTypeSpace},
+			},
+		},
+		{
+			name: "error case: invalid change type",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceMoved,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, membership_changed, membership_added, membership_removed`, got `resource_moved`",
+				Value:   model.ChangeTypeResourceMoved,
+			},
+		},
+		{
+			name: "error case: change type and operation mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationUpdate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `create`, got `update`",
+				Value:   model.OperationUpdate,
+			},
+		},
+		{
+			name: "error case: invalid operation",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.Operation("unknown"),
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+			},
+			want: &DetailedError{
+				Err:     ErrOperationInvalid,
+				Message: "operation mismatch: expected one of `create, update, delete`, got `unknown`",
+				Value:   model.Operation("unknown"),
+			},
+		},
+		{
+			name: "error case: event type mismatch",
+			req: model.UpdateResourceRequest{
+				Resource:   model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation:  model.OperationCreate,
+				ChangeType: model.ChangeTypeResourceAdded,
+				Relations:  validRelations,
+				Context: model.Context{
+					EventType: "NOTE_CREATED",
+				},
+			},
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `SPACE_CREATED`, got `NOTE_CREATED`",
+				Value:   "NOTE_CREATED",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &Client{}
+
+			got := client.validateSpaceRequest(tt.req)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestCheckOperation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		changeType model.ChangeType
+		operation  model.Operation
+		want       *DetailedError
+	}{
+		{
+			name:       "positive case: resource added -> create",
+			changeType: model.ChangeTypeResourceAdded,
+			operation:  model.OperationCreate,
+			want:       nil,
+		},
+		{
+			name:       "positive case: resource removed -> delete",
+			changeType: model.ChangeTypeResourceRemoved,
+			operation:  model.OperationDelete,
+			want:       nil,
+		},
+		{
+			name:       "positive case: resource moved -> update",
+			changeType: model.ChangeTypeResourceMoved,
+			operation:  model.OperationUpdate,
+			want:       nil,
+		},
+		{
+			name:       "positive case: membership changed -> update",
+			changeType: model.ChangeTypeMembershipChanged,
+			operation:  model.OperationUpdate,
+			want:       nil,
+		},
+		{
+			name:       "positive case: membership added -> create",
+			changeType: model.ChangeTypeMembershipAdded,
+			operation:  model.OperationCreate,
+			want:       nil,
+		},
+		{
+			name:       "positive case: membership removed -> delete",
+			changeType: model.ChangeTypeMembershipRemoved,
+			operation:  model.OperationDelete,
+			want:       nil,
+		},
+		{
+			name:       "error case: resource added with update",
+			changeType: model.ChangeTypeResourceAdded,
+			operation:  model.OperationUpdate,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `create`, got `update`",
+				Value:   model.OperationUpdate,
+			},
+		},
+		{
+			name:       "error case: resource removed with create",
+			changeType: model.ChangeTypeResourceRemoved,
+			operation:  model.OperationCreate,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `delete`, got `create`",
+				Value:   model.OperationCreate,
+			},
+		},
+		{
+			name:       "error case: resource moved with delete",
+			changeType: model.ChangeTypeResourceMoved,
+			operation:  model.OperationDelete,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected `update`, got `delete`",
+				Value:   model.OperationDelete,
+			},
+		},
+		{
+			name:       "error case: unknown change type",
+			changeType: model.ChangeType("unknown"),
+			operation:  model.OperationCreate,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "unexpected operation for change type: expected ``, got `create`",
+				Value:   model.OperationCreate,
+			},
+		},
+		{
+			name:       "error case: empty operation",
+			changeType: model.ChangeTypeResourceAdded,
+			operation:  "",
+			want: &DetailedError{
+				Err:     ErrOperationInvalid,
+				Message: "operation mismatch: expected one of `create, update, delete`, got ``",
+				Value:   model.Operation(""),
+			},
+		},
+		{
+			name:       "error case: unknown operation",
+			changeType: model.ChangeTypeResourceAdded,
+			operation:  model.Operation("unknown"),
+			want: &DetailedError{
+				Err:     ErrOperationInvalid,
+				Message: "operation mismatch: expected one of `create, update, delete`, got `unknown`",
+				Value:   model.Operation("unknown"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := checkOperation(tt.changeType, tt.operation)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestCheckChangeType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		changeType model.ChangeType
+		want       *DetailedError
+	}{
+		{
+			name:       "positive case: resource added",
+			changeType: model.ChangeTypeResourceAdded,
+			want:       nil,
+		},
+		{
+			name:       "positive case: resource removed",
+			changeType: model.ChangeTypeResourceRemoved,
+			want:       nil,
+		},
+		{
+			name:       "positive case: resource moved",
+			changeType: model.ChangeTypeResourceMoved,
+			want:       nil,
+		},
+		{
+			name:       "error case: membership changed",
+			changeType: model.ChangeTypeMembershipChanged,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got `membership_changed`",
+				Value:   model.ChangeTypeMembershipChanged,
+			},
+		},
+		{
+			name:       "error case: membership added",
+			changeType: model.ChangeTypeMembershipAdded,
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got `membership_added`",
+				Value:   model.ChangeTypeMembershipAdded,
+			},
+		},
+		{
+			name:       "error case: empty change type",
+			changeType: "",
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got ``",
+				Value:   model.ChangeType(""),
+			},
+		},
+		{
+			name:       "error case: unknown change type",
+			changeType: model.ChangeType("unknown"),
+			want: &DetailedError{
+				Err:     ErrChangeTypeInvalid,
+				Message: "change type mismatch: expected one of `resource_added, resource_removed, resource_moved`, got `unknown`",
+				Value:   model.ChangeType("unknown"),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := checkChangeType(tt.changeType, []model.ChangeType{model.ChangeTypeResourceAdded, model.ChangeTypeResourceRemoved, model.ChangeTypeResourceMoved})
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
+		})
+	}
+}
+
+func TestCheckEventType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		operation model.Operation
+		eventType string
+		want      *DetailedError
+	}{
+		{
+			name:      "positive case: create -> NOTE_CREATED",
+			operation: model.OperationCreate,
+			eventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationCreatedPostfix),
+			want:      nil,
+		},
+		{
+			name:      "positive case: delete -> NOTE_DELETED",
+			operation: model.OperationDelete,
+			eventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationDeletedPostfix),
+			want:      nil,
+		},
+		{
+			name:      "positive case: update -> NOTE_UPDATED",
+			operation: model.OperationUpdate,
+			eventType: fmt.Sprintf("%s_%s", model.EventTypePrefixNote, model.EventTypeOperationUpdatedPostfix),
+			want:      nil,
+		},
+		{
+			name:      "error case: create with NOTE_UPDATED",
+			operation: model.OperationCreate,
+			eventType: "NOTE_UPDATED",
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `NOTE_CREATED`, got `NOTE_UPDATED`",
+				Value:   "NOTE_UPDATED",
+			},
+		},
+		{
+			name:      "error case: delete with NOTE_CREATED",
+			operation: model.OperationDelete,
+			eventType: "NOTE_CREATED",
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `NOTE_DELETED`, got `NOTE_CREATED`",
+				Value:   "NOTE_CREATED",
+			},
+		},
+		{
+			name:      "error case: update with empty event type",
+			operation: model.OperationUpdate,
+			eventType: "",
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `NOTE_UPDATED`, got ``",
+				Value:   "",
+			},
+		},
+		{
+			name:      "error case: unknown operation",
+			operation: model.Operation("unknown"),
+			eventType: "NOTE_CREATED",
+			want: &DetailedError{
+				Err:     ErrEventTypeInvalid,
+				Message: "event type mismatch: expected `NOTE_`, got `NOTE_CREATED`",
+				Value:   "NOTE_CREATED",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := checkEventType(tt.operation, tt.eventType, model.EventTypePrefixNote)
+			if tt.want == nil {
+				require.Nil(t, got)
+				return
+			}
+
+			require.NotNil(t, got)
+			require.Equal(t, tt.want.Message, got.Message)
+			require.Equal(t, tt.want.Value, got.Value)
+			require.ErrorIs(t, got.Err, tt.want.Err)
 		})
 	}
 }

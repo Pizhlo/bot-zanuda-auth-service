@@ -82,25 +82,67 @@ func (h *ResourceHandler) UpdateResource(c echo.Context) error {
 	if err != nil {
 		logrus.WithError(err).Error("error updating resource")
 
-		switch {
-		case errors.Is(err, fga.ErrResounceAlreadyExistsOrNotFound):
-			errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, err.Error(), req.Operation), resp.Meta)
-			return c.JSON(http.StatusConflict, errResp)
-
-		case errors.Is(err, fga.ErrNoTuplesToWriteOrDelete):
-			errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrNoTuplesToWriteOrDelete, err.Error(), req.Operation), resp.Meta)
-			return c.JSON(http.StatusBadRequest, errResp)
-
-		case errors.Is(err, fga.ErrUserNotFound):
-			errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeUserNotFound, err.Error(), req.Operation), resp.Meta)
-			return c.JSON(http.StatusNotFound, errResp)
-		default:
-			errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrInternalServerError, "internal server error", req.Operation), resp.Meta)
-			return c.JSON(http.StatusInternalServerError, errResp)
+		if fgaErr, ok := errors.AsType[*fga.DetailedError](err); ok {
+			return h.responseFromError(c, req, resp, fgaErr.Err, fgaErr)
 		}
+
+		return h.responseFromError(c, req, resp, err, nil)
 	}
 
 	return c.JSON(http.StatusOK, resp)
+}
+
+//nolint:cyclop // много тест-кейсов, но это зависит от количества ошибок.
+func (h *ResourceHandler) responseFromError(c echo.Context, req model.UpdateResourceRequest, resp model.UpdateResourceResponse, err error, detailedError *fga.DetailedError) error {
+	switch {
+	case errors.Is(err, fga.ErrResounceAlreadyExistsOrNotFound):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusConflict, errResp)
+
+	case errors.Is(err, fga.ErrNoTuplesToWriteOrDelete):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrNoTuplesToWriteOrDelete, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrUserNotFound):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeUserNotFound, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusNotFound, errResp)
+
+	case errors.Is(err, fga.ErrOwnerRequired):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeOwnerRequired, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrParentRequired):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeParentRequired, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrChangeTypeInvalid):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeChangeTypeInvalid, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrEventTypeInvalid):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeEventTypeInvalid, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrParentNotAllowed):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeParentNotAllowed, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrResourceEmpty):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeResourceEmpty, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrOwnerTypeInvalid):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeOwnerTypeInvalid, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	case errors.Is(err, fga.ErrParentTypeInvalid):
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrCodeParentTypeInvalid, err.Error(), req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusBadRequest, errResp)
+
+	default:
+		errResp := h.createErrorResponse(req.RequestID, model.StatusError, model.ResultFailed, req.Resource, newMessage(audit.ErrInternalServerError, "internal server error", req.Operation, detailedError), resp.Meta)
+		return c.JSON(http.StatusInternalServerError, errResp)
+	}
 }
 
 // errorResponse - ответ для случая, когда операция прошла неуспешно.
@@ -117,7 +159,8 @@ type errorMessage struct {
 	Code    audit.ErrorCode `json:"code"`
 	Message string          `json:"message"`
 	Details struct {
-		Operation model.Operation `json:"operation"`
+		Operation          model.Operation `json:"operation"`
+		*fga.DetailedError `json:"detailed_error"`
 	} `json:"details"`
 }
 
@@ -133,14 +176,16 @@ func (h *ResourceHandler) createErrorResponse(requestID uuid.UUID, status model.
 	}
 }
 
-func newMessage(code audit.ErrorCode, message string, operation model.Operation) errorMessage {
+func newMessage(code audit.ErrorCode, message string, operation model.Operation, detailedError *fga.DetailedError) errorMessage {
 	return errorMessage{
 		Code:    code,
 		Message: message,
 		Details: struct {
-			Operation model.Operation "json:\"operation\""
+			Operation          model.Operation `json:"operation"`
+			*fga.DetailedError `json:"detailed_error"`
 		}{
-			Operation: operation,
+			Operation:     operation,
+			DetailedError: detailedError,
 		},
 	}
 }

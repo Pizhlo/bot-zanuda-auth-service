@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/openfga/language/pkg/go/transformer"
@@ -382,16 +383,29 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 			event.WithError(audit.ErrCodeUserNotFound, audit.KindValidation, err)
 			event.Append(audit.Level(audit.ErrLevelError))
 
-			return model.UpdateResourceResponse{}, ErrUserNotFound
+			return model.UpdateResourceResponse{}, &DetailedError{
+				Err:   ErrUserNotFound,
+				Value: nil,
+			}
 		}
 
 		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
 		event.Append(audit.Level(audit.ErrLevelError))
 
-		return model.UpdateResourceResponse{}, fmt.Errorf("fga: error getting user id by telegram id: %w", err)
+		return model.UpdateResourceResponse{}, &DetailedError{
+			Err:   fmt.Errorf("fga: error getting user id by telegram id: %w", err),
+			Value: req.TelegramID,
+		}
 	}
 
 	ctx = internal.WithUserID(ctx, userID.String())
+
+	if err := c.validateRequest(req); err != nil {
+		event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
+		event.Append(audit.Level(audit.ErrLevelDebug))
+
+		return model.UpdateResourceResponse{}, err
+	}
 
 	fgaRequest, err := toOpenFGAWriteRequest(req)
 	if err != nil {
@@ -399,10 +413,16 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 		event.Append(audit.Level(audit.ErrLevelError))
 
 		if errors.Is(err, ErrNoTuplesToWriteOrDelete) {
-			return model.UpdateResourceResponse{}, ErrNoTuplesToWriteOrDelete
+			return model.UpdateResourceResponse{}, &DetailedError{
+				Err:   ErrNoTuplesToWriteOrDelete,
+				Value: nil,
+			}
 		}
 
-		return model.UpdateResourceResponse{}, fmt.Errorf("convert request to openfga tuples: %w", err)
+		return model.UpdateResourceResponse{}, &DetailedError{
+			Err:   fmt.Errorf("convert request to openfga tuples: %w", err),
+			Value: nil,
+		}
 	}
 
 	writtenTuples, deletedTuples := toModelTuples(fgaRequest.Writes, fgaRequest.Deletes)
@@ -416,14 +436,20 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 				event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
 				event.Append(audit.Level(audit.ErrLevelError))
 
-				return model.UpdateResourceResponse{}, ErrResounceAlreadyExistsOrNotFound
+				return model.UpdateResourceResponse{}, &DetailedError{
+					Err:   ErrResounceAlreadyExistsOrNotFound,
+					Value: nil,
+				}
 			}
 		}
 
 		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
 		event.Append(audit.Level(audit.ErrLevelError))
 
-		return model.UpdateResourceResponse{}, fmt.Errorf("write tuples to openfga: %w", err)
+		return model.UpdateResourceResponse{}, &DetailedError{
+			Err:   fmt.Errorf("write tuples to openfga: %w", err),
+			Value: nil,
+		}
 	}
 
 	return model.UpdateResourceResponse{
@@ -438,4 +464,271 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 			AuthModelID: c.modelID,
 		},
 	}, nil
+}
+
+type DetailedError struct {
+	Err     error  `json:"-"` // поле для внутреннего использования
+	Message string `json:"message"`
+	Value   any    `json:"value"`
+}
+
+func (d *DetailedError) Error() string {
+	return d.Err.Error()
+}
+
+func (d *DetailedError) Unwrap() error {
+	return d.Err
+}
+
+func (c *Client) validateRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Resource.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrResourceEmpty,
+			Value: req.Resource,
+		}
+	}
+
+	switch req.Resource.Type {
+	case model.ResourceTypeNote:
+		return c.validateNoteRequest(req)
+	case model.ResourceTypeReminder:
+		return c.validateReminderRequest(req)
+	case model.ResourceTypeSpace:
+		return c.validateSpaceRequest(req)
+	default:
+		return &DetailedError{
+			Err:   fmt.Errorf("invalid resource type: %s", req.Resource.Type),
+			Value: req.Resource.Type,
+		}
+	}
+}
+
+var (
+	ErrOwnerRequired     = errors.New("owner is required")
+	ErrParentRequired    = errors.New("parent is required")
+	ErrChangeTypeInvalid = errors.New("change type is invalid")
+	ErrOperationInvalid  = errors.New("operation is invalid")
+	ErrEventTypeInvalid  = errors.New("event type is invalid")
+	ErrParentNotAllowed  = errors.New("parent is not allowed")
+	ErrResourceEmpty     = errors.New("resource is empty")
+	ErrOwnerTypeInvalid  = errors.New("owner type is invalid: must be user")
+	ErrParentTypeInvalid = errors.New("parent type is invalid: must be space")
+)
+
+// validateNoteRequest проверяет запрос на обновление заметки.
+// У заметок должны быть родители и владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение.
+//
+//nolint:dupl // нам нужно оставить разделение на разные функции для расширения
+func (c *Client) validateNoteRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Relations.Owner.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrOwnerRequired,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Owner.Type != model.ResourceTypeUser {
+		return &DetailedError{
+			Err:   ErrOwnerTypeInvalid,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Parent.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrParentRequired,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	if req.Relations.Parent.Type != model.ResourceTypeSpace {
+		return &DetailedError{
+			Err:   ErrParentTypeInvalid,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	noteAllowedChangeTypes := []model.ChangeType{
+		model.ChangeTypeResourceAdded,
+		model.ChangeTypeResourceRemoved,
+		model.ChangeTypeResourceMoved,
+	}
+
+	if err := checkChangeType(req.ChangeType, noteAllowedChangeTypes); err != nil {
+		return err
+	}
+
+	if err := checkOperation(req.ChangeType, req.Operation); err != nil {
+		return err
+	}
+
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixNote); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateReminderRequest проверяет запрос на обновление напоминания.
+// У напоминаний должны быть родители и владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение.
+//
+//nolint:dupl // нам нужно оставить разделение на разные функции для расширения
+func (c *Client) validateReminderRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Relations.Owner.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrOwnerRequired,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Owner.Type != model.ResourceTypeUser {
+		return &DetailedError{
+			Err:   ErrOwnerTypeInvalid,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if req.Relations.Parent.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrParentRequired,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	if req.Relations.Parent.Type != model.ResourceTypeSpace {
+		return &DetailedError{
+			Err:   ErrParentTypeInvalid,
+			Value: req.Relations.Parent,
+		}
+	}
+
+	reminderAllowedChangeTypes := []model.ChangeType{
+		model.ChangeTypeResourceAdded,
+		model.ChangeTypeResourceRemoved,
+		model.ChangeTypeResourceMoved,
+	}
+
+	if err := checkChangeType(req.ChangeType, reminderAllowedChangeTypes); err != nil {
+		return err
+	}
+
+	if err := checkOperation(req.ChangeType, req.Operation); err != nil {
+		return err
+	}
+
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixReminder); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSpaceRequest проверяет запрос на обновление пространства.
+// У пространств нет родителей, только владельцы.
+// Допустимые типы изменений: добавление, удаление, изменение прав и состава участников.
+func (c *Client) validateSpaceRequest(req model.UpdateResourceRequest) *DetailedError {
+	if req.Relations.Owner.IsEmpty() {
+		return &DetailedError{
+			Err:   ErrOwnerRequired,
+			Value: req.Relations.Owner,
+		}
+	}
+
+	if !req.Relations.Parent.IsEmpty() {
+		return &DetailedError{
+			Err:     ErrParentNotAllowed,
+			Message: "spaces do not have parents, only owners",
+			Value:   req.Relations.Parent,
+		}
+	}
+
+	spaceAllowedChangeTypes := []model.ChangeType{
+		model.ChangeTypeResourceAdded,
+		model.ChangeTypeResourceRemoved,
+		model.ChangeTypeMembershipChanged,
+		model.ChangeTypeMembershipAdded,
+		model.ChangeTypeMembershipRemoved,
+	}
+
+	if err := checkChangeType(req.ChangeType, spaceAllowedChangeTypes); err != nil {
+		return err
+	}
+
+	if err := checkOperation(req.ChangeType, req.Operation); err != nil {
+		return err
+	}
+
+	if err := checkEventType(req.Operation, req.Context.EventType, model.EventTypePrefixSpace); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func checkOperation(changeType model.ChangeType, originalOperation model.Operation) *DetailedError {
+	switch originalOperation {
+	case model.OperationCreate, model.OperationUpdate, model.OperationDelete:
+	default:
+		expected := []string{string(model.OperationCreate), string(model.OperationUpdate), string(model.OperationDelete)}
+
+		return &DetailedError{
+			Err:     ErrOperationInvalid,
+			Message: fmt.Sprintf("operation mismatch: expected one of `%s`, got `%s`", strings.Join(expected, ", "), originalOperation),
+			Value:   originalOperation,
+		}
+	}
+
+	operation := model.ChangeTypeToOperation[changeType]
+	if operation != originalOperation {
+		return &DetailedError{
+			Err:     ErrChangeTypeInvalid,
+			Message: fmt.Sprintf("unexpected operation for change type: expected `%s`, got `%s`", operation, originalOperation),
+			Value:   originalOperation,
+		}
+	}
+
+	return nil
+}
+
+func checkChangeType(changeType model.ChangeType, allowedChangeTypes []model.ChangeType) *DetailedError {
+	if !changeType.IsOneOf(allowedChangeTypes...) {
+		allowed := make([]string, len(allowedChangeTypes))
+		for i, ct := range allowedChangeTypes {
+			allowed[i] = string(ct)
+		}
+
+		return &DetailedError{
+			Err:     ErrChangeTypeInvalid,
+			Message: fmt.Sprintf("change type mismatch: expected one of `%s`, got `%s`", strings.Join(allowed, ", "), changeType),
+			Value:   changeType,
+		}
+	}
+
+	return nil
+}
+
+func checkEventType(operation model.Operation, originalEventType string, eventTypePrefix string) *DetailedError {
+	eventTypePostfix := ""
+
+	switch operation {
+	case model.OperationCreate:
+		eventTypePostfix = model.EventTypeOperationCreatedPostfix
+	case model.OperationDelete:
+		eventTypePostfix = model.EventTypeOperationDeletedPostfix
+	case model.OperationUpdate:
+		eventTypePostfix = model.EventTypeOperationUpdatedPostfix
+	}
+
+	eventType := model.FormatEventType(eventTypePrefix, eventTypePostfix)
+	if eventType != originalEventType {
+		return &DetailedError{
+			Err:     ErrEventTypeInvalid,
+			Message: fmt.Sprintf("event type mismatch: expected `%s`, got `%s`", eventType, originalEventType),
+			Value:   originalEventType,
+		}
+	}
+
+	return nil
 }

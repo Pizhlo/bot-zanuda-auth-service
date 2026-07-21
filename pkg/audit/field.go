@@ -242,6 +242,24 @@ const (
 	ErrCodeTokenGenerationFailed ErrorCode = "TOKEN_GENERATION_FAILED"
 	// ErrCodeUserNotFound - код ошибки для случая, когда пользователь не найден.
 	ErrCodeUserNotFound ErrorCode = "USER_NOT_FOUND"
+	// ErrCodeOwnerRequired - код ошибки для случая, когда owner required.
+	ErrCodeOwnerRequired ErrorCode = "OWNER_REQUIRED"
+	// ErrCodeParentRequired - код ошибки для случая, когда parent required.
+	ErrCodeParentRequired ErrorCode = "PARENT_REQUIRED"
+	// ErrCodeChangeTypeInvalid - код ошибки для случая, когда change type invalid.
+	ErrCodeChangeTypeInvalid ErrorCode = "CHANGE_TYPE_INVALID"
+	// ErrCodeOperationInvalid - код ошибки для случая, когда operation invalid.
+	ErrCodeOperationInvalid ErrorCode = "OPERATION_INVALID"
+	// ErrCodeEventTypeInvalid - код ошибки для случая, когда event type invalid.
+	ErrCodeEventTypeInvalid ErrorCode = "EVENT_TYPE_INVALID"
+	// ErrCodeParentNotAllowed - код ошибки для случая, когда parent not allowed.
+	ErrCodeParentNotAllowed ErrorCode = "PARENT_NOT_ALLOWED"
+	// ErrCodeResourceEmpty - код ошибки для случая, когда resource empty.
+	ErrCodeResourceEmpty ErrorCode = "RESOURCE_EMPTY"
+	// ErrCodeOwnerTypeInvalid - код ошибки для случая, когда owner type invalid.
+	ErrCodeOwnerTypeInvalid ErrorCode = "OWNER_TYPE_INVALID"
+	// ErrCodeParentTypeInvalid - код ошибки для случая, когда parent type invalid.
+	ErrCodeParentTypeInvalid ErrorCode = "PARENT_TYPE_INVALID"
 	// ErrCodePanic - код ошибки для случая, когда произошла паника.
 	ErrCodePanic ErrorCode = "PANIC"
 	// ErrCodeWriteFailedDueToInvalidInput - код ошибки для случая, когда write failed due to invalid input.

@@ -1,3 +1,4 @@
+//nolint:funlen // тестовые функции могут быть любой длины
 package model
 
 import (
@@ -52,6 +53,105 @@ func TestResource_ParentRelationName(t *testing.T) {
 
 			got, err := tt.resource.ParentRelationName()
 			tt.wantErr(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestResource_IsEmpty(t *testing.T) {
+	t.Parallel()
+
+	r := Resource{ID: uuid.New(), Type: ResourceTypeNote}
+	require.False(t, r.IsEmpty())
+
+	r = Resource{ID: uuid.Nil, Type: ""}
+	require.True(t, r.IsEmpty())
+
+	r = Resource{ID: uuid.Nil, Type: ResourceTypeNote}
+	require.True(t, r.IsEmpty())
+
+	r = Resource{ID: uuid.New(), Type: ""}
+	require.True(t, r.IsEmpty())
+}
+
+func TestChangeType_IsOneOf(t *testing.T) {
+	t.Parallel()
+
+	c := ChangeTypeResourceAdded
+	require.True(t, c.IsOneOf(ChangeTypeResourceAdded, ChangeTypeResourceRemoved, ChangeTypeResourceMoved))
+	require.False(t, c.IsOneOf(ChangeTypeMembershipChanged, ChangeTypeMembershipAdded, ChangeTypeMembershipRemoved))
+}
+
+func TestFormatEventType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		eventTypePrefix  string
+		eventTypePostifx string
+		want             string
+	}{
+		{
+			name:             "note_created",
+			eventTypePrefix:  EventTypePrefixNote,
+			eventTypePostifx: EventTypeOperationCreatedPostfix,
+			want:             "NOTE_CREATED",
+		},
+		{
+			name:             "note_updated",
+			eventTypePrefix:  EventTypePrefixNote,
+			eventTypePostifx: EventTypeOperationUpdatedPostfix,
+			want:             "NOTE_UPDATED",
+		},
+		{
+			name:             "note_deleted",
+			eventTypePrefix:  EventTypePrefixNote,
+			eventTypePostifx: EventTypeOperationDeletedPostfix,
+			want:             "NOTE_DELETED",
+		},
+		{
+			name:             "reminder_created",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationCreatedPostfix,
+			want:             "REMINDER_CREATED",
+		},
+		{
+			name:             "reminder_updated",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationUpdatedPostfix,
+			want:             "REMINDER_UPDATED",
+		},
+		{
+			name:             "reminder_deleted",
+			eventTypePrefix:  EventTypePrefixReminder,
+			eventTypePostifx: EventTypeOperationDeletedPostfix,
+			want:             "REMINDER_DELETED",
+		},
+		{
+			name:             "space_created",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationCreatedPostfix,
+			want:             "SPACE_CREATED",
+		},
+		{
+			name:             "space_updated",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationUpdatedPostfix,
+			want:             "SPACE_UPDATED",
+		},
+		{
+			name:             "space_deleted",
+			eventTypePrefix:  EventTypePrefixSpace,
+			eventTypePostifx: EventTypeOperationDeletedPostfix,
+			want:             "SPACE_DELETED",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := FormatEventType(tt.eventTypePrefix, tt.eventTypePostifx)
 			require.Equal(t, tt.want, got)
 		})
 	}
