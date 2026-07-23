@@ -351,16 +351,77 @@ func (c *Client) writeAuthorizationModel(ctx context.Context, body openfga.Write
 	return data, nil
 }
 
-// ErrResounceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
+// ErrResourceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
 var (
-	ErrResounceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
+	ErrResourceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
 	ErrUserNotFound                    = errors.New("user not found")
+	ErrValidationFailed                = errors.New("validation failed")
 )
 
 const (
 	serviceName             = "fga"
 	operationUpdateResource = "update_resource"
+	operationCheckDecision  = "check_decision"
 )
+
+// CheckDecision проверяет решение.
+func (c *Client) CheckDecision(ctx context.Context, req model.CheckDecisionRequest) (model.CheckDecisionResponse, error) {
+	operationCheckDecisionName := fmt.Sprintf("%s.%s", serviceName, operationCheckDecision)
+
+	ctx = internal.WithOperation(ctx, operationCheckDecisionName)
+	ctx = internal.WithServiceName(ctx)
+
+	event := c.auditor.Create(ctx)
+	defer internal.WithPanicRecovery(ctx, event)()
+
+	event.Append(audit.RequestID(req.RequestID.String()))
+
+	ctx = internal.WithUserID(ctx, req.UserID.String())
+
+	fgaRequest, err := toOpenFGACheckDecisionRequest(req)
+	if err != nil {
+		event.WithError(audit.ErrCodeValidationFailed, audit.KindValidation, err)
+		event.Append(audit.Level(audit.ErrLevelWarn))
+
+		return model.CheckDecisionResponse{}, err // toOpenFGACheckDecisionRequest возвращает DetailedError
+	}
+
+	resp, err := c.fgaClient.Check(ctx).Body(fgaRequest).Options(openFGAClient.ClientCheckOptions{
+		AuthorizationModelId: &c.modelID,
+	}).Execute()
+	if err != nil {
+		if fgaErr, ok := err.(openfga.FgaApiValidationError); ok {
+			if code := fgaErr.ResponseCode(); code == openfga.ERRORCODE_VALIDATION_ERROR {
+				event.WithError(audit.ErrCodeValidationFailed, audit.KindValidation, err)
+				event.Append(audit.Level(audit.ErrLevelWarn))
+
+				return model.CheckDecisionResponse{}, &DetailedError{
+					Err:     ErrValidationFailed,
+					Message: "validation failed",
+					Value:   nil,
+				}
+			}
+		}
+
+		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
+		event.Append(audit.Level(audit.ErrLevelError))
+
+		return model.CheckDecisionResponse{}, &DetailedError{
+			Err:     fmt.Errorf("fga: error checking decision: %w", err),
+			Message: "error checking decision",
+			Value:   nil,
+		}
+	}
+
+	return model.CheckDecisionResponse{
+		RequestID:  req.RequestID,
+		DecisionID: uuid.New(), // пока не сохраняем решения, поэтому просто генерируем новый uuid
+		Result:     resp.GetAllowed(),
+		Meta: model.Meta{
+			AuthModelID: c.modelID,
+		},
+	}, nil
+}
 
 // UpdateResource обновляет ресурс в OpenFGA.
 // Если создаваемый ресурс уже существует или удаляемый ресурс не найден, возвращает ошибку ErrResounceAlreadyExistsOrNotFound.
@@ -437,7 +498,7 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 				event.Append(audit.Level(audit.ErrLevelError))
 
 				return model.UpdateResourceResponse{}, &DetailedError{
-					Err:   ErrResounceAlreadyExistsOrNotFound,
+					Err:   ErrResourceAlreadyExistsOrNotFound,
 					Value: nil,
 				}
 			}

@@ -30,6 +30,61 @@ func toOpenFGAWriteRequest(req model.UpdateResourceRequest) (openFGAClient.Clien
 	}, nil
 }
 
+//nolint:gochecknoglobals // статические маппинги action/resource -> FGA relation
+var (
+	actionToRelation = map[model.ActionName]model.ActionType{
+		model.ActionNameRead:         model.ActionTypeRead,
+		model.ActionNameUpdate:       model.ActionTypeCanUpdate,
+		model.ActionNameDelete:       model.ActionTypeCanDelete,
+		model.ActionNameStopReminder: model.ActionTypeCanStopReminder,
+	}
+
+	createRelationByResource = map[model.ResourceType]model.ActionType{
+		model.ResourceTypeNote:     model.ActionTypeCreateNote,
+		model.ResourceTypeReminder: model.ActionTypeCreateReminder,
+	}
+)
+
+// toOpenFGACheckDecisionRequest преобразует запрос на проверку решения в запрос Check в OpenFGA.
+func toOpenFGACheckDecisionRequest(req model.CheckDecisionRequest) (openFGAClient.ClientCheckRequest, error) {
+	relation, err := relationFromAction(req.Action.Name, req.Resource.Type)
+	if err != nil {
+		return openFGAClient.ClientCheckRequest{}, err
+	}
+
+	return openFGAClient.ClientCheckRequest{
+		User:     formatObject(req.Subject.Resource),
+		Relation: string(relation),
+		Object:   formatObject(req.Resource),
+	}, nil
+}
+
+func relationFromAction(action model.ActionName, resourceType model.ResourceType) (model.ActionType, error) {
+	if action == model.ActionNameCreate {
+		relation, ok := createRelationByResource[resourceType]
+		if !ok {
+			return model.ActionType(""), &DetailedError{
+				Err:     ErrValidationFailed,
+				Message: "unknown resource type",
+				Value:   resourceType,
+			}
+		}
+
+		return relation, nil
+	}
+
+	rel, ok := actionToRelation[action]
+	if !ok {
+		return model.ActionType(""), &DetailedError{
+			Err:     ErrValidationFailed,
+			Message: "unknown action",
+			Value:   action,
+		}
+	}
+
+	return rel, nil
+}
+
 // tuplesFromRequest формирует tuples для записи и удаления на основе типа операции в запросе.
 func tuplesFromRequest(req model.UpdateResourceRequest) (
 	[]openFGAClient.ClientTupleKey,

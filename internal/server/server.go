@@ -56,6 +56,8 @@ type healthHandler interface {
 type resourcesEditor interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(c echo.Context) error
+	// CheckDecision проверяет решение.
+	CheckDecision(c echo.Context) error
 }
 
 type notesEditor interface {
@@ -207,7 +209,8 @@ func (s *Server) createRoutes() error {
 	// resources
 	resources := apiv0.Group("resources/", s.api.middleware.CheckToken)
 
-	resources.POST("update", s.api.h0.UpdateResource)
+	resources.POST("update", s.api.h0.UpdateResource)         // обновление ресурса (после проверки)
+	resources.POST("decisions/check", s.api.h0.CheckDecision) // проверяет решение: позволить ли пользователю выполнить операцию
 
 	s.e = e
 

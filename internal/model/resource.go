@@ -12,19 +12,20 @@ type ResourceType string
 
 const (
 	// ResourceTypeSpace - пространство.
-	ResourceTypeSpace = "space"
+	ResourceTypeSpace ResourceType = "space"
 	// ResourceTypeNote - заметка.
-	ResourceTypeNote = "note"
+	ResourceTypeNote ResourceType = "note"
 	// ResourceTypeReminder - напоминание.
-	ResourceTypeReminder = "reminder"
+	ResourceTypeReminder ResourceType = "reminder"
 	// ResourceTypeUser - пользователь.
-	ResourceTypeUser = "user"
+	ResourceTypeUser ResourceType = "user"
 )
 
 // Resource - ресурс.
 type Resource struct {
-	ID   uuid.UUID    `json:"id"`
-	Type ResourceType `json:"type"`
+	ID         uuid.UUID      `json:"id"`
+	Type       ResourceType   `json:"type"`
+	Attributes map[string]any `json:"attributes"`
 }
 
 func (r Resource) IsEmpty() bool {
@@ -157,9 +158,41 @@ type Tuple struct {
 	Resource string `json:"resource"`
 }
 
+type RelationType string
+
+const (
+	RelationTypeOwner  RelationType = "owner"
+	RelationTypeViewer RelationType = "viewer"
+	RelationTypeEditor RelationType = "editor"
+	RelationTypeAdmin  RelationType = "admin"
+)
+
+// ActionType - типы действий пользователя над ресурсом (согласно auth-модели OpenFGA).
+type ActionType string
+
+const (
+	// Типы действий над пространством.
+	ActionTypeRead           ActionType = "can_view" // также доступно для note и reminder
+	ActionTypeCreateNote     ActionType = "can_create_note"
+	ActionTypeCreateReminder ActionType = "can_create_reminder"
+	ActionTypeManageMembers  ActionType = "can_manage_members"
+	ActionTypeManageSpace    ActionType = "can_manage_space"
+
+	// note.
+	ActionTypeCanUpdate ActionType = "can_update" // также доступно для reminder
+	ActionTypeCanDelete ActionType = "can_delete" // также доступно для reminder
+
+	// reminder.
+	ActionTypeCanStopReminder ActionType = "can_stop_reminder"
+)
+
 // Meta - метаданные ответа на запрос на обновление ресурса.
 type Meta struct {
-	AuthModelID string `json:"auth_model_id"`
+	AuthModelID string   `json:"auth_model_id"`
+	Subject     Subject  `json:"subject"`
+	Action      Action   `json:"action"`
+	Resource    Resource `json:"resource"`
+	Context     Context  `json:"context"`
 }
 
 // UpdateResourceResponse - ответ на запрос на обновление ресурса.
@@ -193,4 +226,49 @@ const (
 //		FormatEventType("NOTE", "DELETED") -> "NOTE_DELETED"
 func FormatEventType(eventTypePrefix, eventTypePostifx string) string {
 	return fmt.Sprintf("%s_%s", eventTypePrefix, eventTypePostifx)
+}
+
+type SubjectType string
+
+const (
+	SubjectTypeUser     SubjectType = "user"
+	SubjectTypeSpace    SubjectType = "space"
+	SubjectTypeNote     SubjectType = "note"
+	SubjectTypeReminder SubjectType = "reminder"
+)
+
+type Subject struct {
+	Resource
+	Relation string `json:"relation"`
+}
+
+type ActionName string
+
+const (
+	ActionNameCreate       ActionName = "create"
+	ActionNameUpdate       ActionName = "update"
+	ActionNameDelete       ActionName = "delete"
+	ActionNameRead         ActionName = "read"
+	ActionNameStopReminder ActionName = "stop_reminder"
+)
+
+type Action struct {
+	Name       ActionName     `json:"name"`
+	Attributes map[string]any `json:"attributes"`
+}
+
+type CheckDecisionRequest struct {
+	RequestID uuid.UUID `json:"request_id"`
+	Subject   Subject   `json:"subject"`
+	UserID    uuid.UUID `json:"user_id"`
+	Action    Action    `json:"action"`
+	Resource  Resource  `json:"resource"`
+	Context   Context   `json:"context"`
+}
+
+type CheckDecisionResponse struct {
+	RequestID  uuid.UUID `json:"request_id"`
+	DecisionID uuid.UUID `json:"decision_id"`
+	Result     bool      `json:"result"`
+	Meta       Meta      `json:"meta"`
 }

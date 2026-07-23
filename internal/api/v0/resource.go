@@ -25,6 +25,8 @@ type ResourceHandler struct {
 type resourceService interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(ctx context.Context, req model.UpdateResourceRequest) (model.UpdateResourceResponse, error)
+	// CheckDecision проверяет решение.
+	CheckDecision(ctx context.Context, req model.CheckDecisionRequest) (model.CheckDecisionResponse, error)
 }
 
 // resourceHandlerOption - опция для хендлера обновления ресурсов.

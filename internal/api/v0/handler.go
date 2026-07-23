@@ -38,6 +38,8 @@ type notesProcessorHandler interface {
 type resourcesProcessorHandler interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(c echo.Context) error
+	// CheckDecision проверяет решение.
+	CheckDecision(c echo.Context) error
 }
 
 type handlerOption func(*Handler)
@@ -153,4 +155,9 @@ func (h *Handler) FilterNotes(c echo.Context) error {
 // UpdateResource обновляет ресурс.
 func (h *Handler) UpdateResource(c echo.Context) error {
 	return h.resources.UpdateResource(c)
+}
+
+// CheckDecision проверяет решение.
+func (h *Handler) CheckDecision(c echo.Context) error {
+	return h.resources.CheckDecision(c)
 }

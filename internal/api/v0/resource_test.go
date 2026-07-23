@@ -216,7 +216,7 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 
 				resourceSvc.EXPECT().
 					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, fga.ErrResounceAlreadyExistsOrNotFound)
+					Return(model.UpdateResourceResponse{}, fga.ErrResourceAlreadyExistsOrNotFound)
 			},
 			checkWant: func(t *testing.T, actual wantResponse) {
 				t.Helper()
@@ -227,7 +227,7 @@ func TestResourceHandler_UpdateResource(t *testing.T) {
 					Status:       model.StatusError,
 					Result:       model.ResultFailed,
 					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResounceAlreadyExistsOrNotFound.Error(), updateRequest.Operation, nil),
+					ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResourceAlreadyExistsOrNotFound.Error(), updateRequest.Operation, nil),
 					Meta:         model.Meta{},
 				}, actual.errResp)
 			},
@@ -545,7 +545,7 @@ func TestResourceHandler_ErrorJSON(t *testing.T) {
 		},
 		{
 			name:    "conflict",
-			err:     fga.ErrResounceAlreadyExistsOrNotFound,
+			err:     fga.ErrResourceAlreadyExistsOrNotFound,
 			status:  http.StatusConflict,
 			code:    audit.ErrCodeResourceAlreadyExistsOrNotFound,
 			message: "new resource already exists or deleted resource not found",
