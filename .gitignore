@@ -7,4 +7,6 @@
 *.crt
 
 # только для локальных сессий
-CONTEXT.md 
+CONTEXT.md
+.testkit-runs/
+.logs/
