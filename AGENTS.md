@@ -276,3 +276,15 @@ This rule applies to:
 - changes to legacy component boundaries (`politics`, `enforcer`, Casbin).
 
 The only exceptions are trivial refactors that do not change external behavior, error messages, or authorization logic.
+
+IDE использует config.yaml из auth-service и существующий containers-up;
+тесты читают config.yaml из pytests. RUN_ID не требуется. Для IDE используйте containers-up в auth-service;
+сервис запускает разработчик в IDE. Integration-run с AUTH_MODE=host выполняет
+готовность, seed и pytest, сохраняет зависимости при любом результате до явного down.
+Контейнерный локальный успех убирает ресурсы, CI убирает их при любом исходе.
+Не возвращать генерацию конфигов и динамические порты для локальной отладки.
+
+Для host/host не требовать integration-up и не вызывать Docker: seed и pytest запускаются
+на хосте с одним PYTEST_CONFIG (по умолчанию config.yaml pytests). Локальные YAML
+пользователя не переписывать и не коммитить. Данные подготавливает pytest либо отдельная Make-команда.
+Compose overlays нужны только контейнерным/смешанным сценариям.
