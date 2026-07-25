@@ -1,121 +1,64 @@
-name: Pytests
+name: integration-tests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-  workflow_call:
+    branches: [main]
+  push:
+    branches: [main]
 
 jobs:
-  docker-pytests:
+  integration:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repository
+      - name: Checkout auth-service
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Create .env from secrets
-        run: |
-          cat <<EOF > .env
-          VAULT_ADDR=${{ secrets.VAULT_ADDR }}
-          VAULT_DEV_ROOT_TOKEN=${{ secrets.VAULT_DEV_ROOT_TOKEN }}
-          VAULT_PORT=${{ secrets.VAULT_PORT }}
-          BOT_API_KEY=${{ secrets.BOT_API_KEY }}
-          VAULT_SECRETS_PATH=${{ secrets.VAULT_SECRETS_PATH }}
+      - name: Checkout platform-testkit
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.TESTKIT_REPO }}
+          path: platform-testkit
+          ref: BZ-184 # временно, пока налаживается workflow
+          token: ${{ secrets.CI_GITHUB_TOKEN }}
+          persist-credentials: false
 
-          REDIS_PORT=${{ secrets.REDIS_PORT }}
+      - name: Build auth image
+        run: docker build -t auth-service:test-${GITHUB_SHA} .
 
-          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-          POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
-          POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
-
-          AUTH_SERVICE_PORT=${{ secrets.AUTH_SERVICE_PORT }}
-
-          POSTGRES_USER_FGA=${{ secrets.POSTGRES_USER_FGA }}
-          POSTGRES_PASSWORD_FGA=${{ secrets.POSTGRES_PASSWORD_FGA }}
-          POSTGRES_DB_FGA=${{ secrets.POSTGRES_DB_FGA }}
-          POSTGRES_PORT_FGA=${{ secrets.POSTGRES_PORT_FGA }}
-          POSTGRES_HOST_FGA=${{ secrets.POSTGRES_HOST_FGA }}
-
-          IMAGE_NAME=${{ secrets.IMAGE_NAME }}
-          EOF
-
-      - name: Show .env keys (debug)
-        run: |
-          echo "Generated .env:"
-          sed 's/=.*/=<hidden>/' .env
-
-      - name: Create config-tests.yaml from secret
-        run: |
-          cat <<EOF > config-tests.yaml
-          ${{ secrets.CONFIG }}
-          EOF
-
-      - name: Create config-pytests.yaml from secret
-        run: |
-          cat <<EOF > config-pytests.yaml
-          ${{ secrets.PYTESTS_CONFIG }}
-          EOF
-
-      - name: Run Postgres
-        run: docker compose -f docker-compose.tests.yaml up -d postgres
-
-      - name: Wait for Postgres to be ready
+      - name: Start integration environment
+        working-directory: platform-testkit
         env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          AUTH_IMAGE: auth-service:test-${{ github.sha }}
+          AUTOTESTS_TAG: latest
         run: |
-          echo "🔍 Checking postgres status..."
+          set -euo pipefail
+          make integration-up
 
-          echo "containers status:"
-          docker compose -f docker-compose.tests.yaml ps
-          
-          # Check PostgreSQL
-          echo "📊 Waiting for PostgreSQL..."
-          if timeout 60 bash -c 'until docker compose -f docker-compose.tests.yaml exec -T postgres pg_isready -U $POSTGRES_USER -d $POSTGRES_DB; do sleep 2; done'; then
-            echo "✅ PostgreSQL is ready"
-          else
-            echo "❌ PostgreSQL failed to start or is not responding"
-            echo "📋 PostgreSQL container status:"
-            docker compose -f docker-compose.tests.yaml ps postgres
-            echo "📋 PostgreSQL logs:"
-            docker compose -f docker-compose.tests.yaml logs postgres
-            exit 1
-          fi
-
-      - name: Prepare Containers for Pytests
-        run: >
-          docker compose -f docker-compose.tests.yaml --profile init run --rm setup-vault &&
-          docker compose -f docker-compose.tests.yaml --profile init run --rm rabbitmq-setup &&
-          docker compose -f docker-compose.tests.yaml --profile init run --rm fga-migrate
-
-      - name: Run Redis and Auth Service
-        run: docker compose -f docker-compose.tests.yaml up -d redis auth-service
-
-      - name: Wait for Auth Service health
+      - name: Seed integration data
+        working-directory: platform-testkit
+        env:
+          AUTH_IMAGE: auth-service:test-${{ github.sha }}
+          AUTOTESTS_TAG: latest
         run: |
-          timeout 120 bash -c 'until [ "$(docker inspect -f "{{.State.Health.Status}}" auth-service-tests)" = "healthy" ]; do sleep 2; done'
+          set -euo pipefail
+          make integration-seed
 
-      - name: Auth service logs (on health check failure)
-        if: failure()
-        run: docker compose -f docker-compose.tests.yaml logs --no-color --tail=200 auth-service
+      - name: Run integration tests
+        working-directory: platform-testkit
+        env:
+          AUTH_IMAGE: auth-service:test-${{ github.sha }}
+          AUTOTESTS_TAG: latest
+        run: |
+          set -euo pipefail
+          make integration-test
 
-      - name: Fill DB with test data
-        run: make testdata-up DB=tests
-
-      - name: Run docker tests
-        run: docker compose -f docker-compose.tests.yaml up pytests --build --abort-on-container-exit --exit-code-from pytests
-
-      - name: Pytests logs (on failure)
-        if: failure()
-        run: docker compose -f docker-compose.tests.yaml logs --no-color --tail=200 auth-service
-
-      - name: Stop containers
+      - name: Cleanup
         if: always()
-        run: make docker-tests-down DB=tests
+        working-directory: platform-testkit
+        env:
+          AUTH_IMAGE: auth-service:test-${{ github.sha }}
+        run: |
+          docker compose --env-file ./env/compose.env -f ./compose/docker-compose.intergation.yaml down -v --remove-orphans
