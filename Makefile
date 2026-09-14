@@ -247,63 +247,6 @@ migrate-down:
 
 .PHONY: migrate-up migrate-down add-test-user remove-test-user testdata-up testdata-down
 
-# Тестовые данные: список имён (без .up.sql/.down.sql), порядок = порядок накатывания
-TESTDATA_ENTRIES := test_user test_space test_notes test_shared_space
-
-DB ?= local
-
-add-test-user:
-	@echo "> adding test_user..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.up.sql
-	@echo "> test_user applied"
-
-remove-test-user:
-	@echo "> removing test_user..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_user.down.sql
-	@echo "> test_user rolled back"
-
-add-test-space:
-	@echo "> adding test_space..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.up.sql
-	@echo "> test_space applied"
-
-remove-test-space:
-	@echo "> removing test_space..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_space.down.sql
-	@echo "> test_space rolled back"
-
-add-test-notes:
-	@echo "> adding test_notes..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.up.sql
-	@echo "> test_notes applied"
-
-remove-test-notes:
-	@echo "> removing test_notes..."
-	docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/test_notes.down.sql
-	@echo "> test_notes rolled back"
-
-# Накатить все тестовые данные из testdata (порядок задаётся TESTDATA_ENTRIES)
-testdata-up:
-	@echo "> applying testdata..."
-	@set -e;
-	@for name in $(TESTDATA_ENTRIES); do \
-		echo "> applying testdata/$$name.up.sql..."; \
-		docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.up.sql; \
-	done
-	@echo "> testdata applied"
-
-# Откатить все тестовые данные (обратный порядок)
-testdata-down:
-	@echo "> rolling back testdata..."
-	@set -e;
-	@for name in $$(echo $(TESTDATA_ENTRIES) | tr ' ' '\n' | tac); do \
-		echo "> rolling back testdata/$$name.down.sql..."; \
-		docker exec -i auth-service-postgres-$(DB) psql -v ON_ERROR_STOP=1 -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) < $(CUR_DIR)/testdata/$$name.down.sql; \
-	done
-	@echo "> testdata rolled back"
-
-.PHONY: add-test-user remove-test-user add-test-space remove-test-space add-test-notes remove-test-notes testdata-up testdata-down
-
 RABBITMQ ?= true
 
 # Базовые сервисы (всегда)
@@ -319,7 +262,7 @@ endif
 containers-up:
 	@echo "🚀 Starting services: $(ALL_SERVICES)"
 	docker compose -f docker-compose.yaml --profile init run --rm setup-vault
-	docker compose -f docker-compose.tests.yaml --profile init run --rm fga-migrate
+	docker compose -f docker-compose.yaml --profile init run --rm fga-migrate
 	docker compose -f docker-compose.yaml up -d postgres-fga open-fga
 ifeq ($(RABBITMQ),true)
 	docker compose -f docker-compose.yaml --profile init run --rm rabbitmq-setup
