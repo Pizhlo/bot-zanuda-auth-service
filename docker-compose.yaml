@@ -94,8 +94,8 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
 
   # Инициализация очередей: DLX, DLQ, policy и очередь errors.auth-service.
-  # Запускается отдельно через `make docker-tests-up` (profile init), не вместе с `up`:
-  # иначе `--abort-on-container-exit` остановит стек при exit code 0 setup-контейнера.
+  # Make-цели containers-up/up выполняют этот одноразовый этап через профиль init
+  # перед обычным запуском зависимостей; RABBITMQ=false пропускает настройку брокера.
   rabbitmq-setup:
     image: curlimages/curl
     container_name: auth-service-rabbitmq-setup-tests

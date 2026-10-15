@@ -276,3 +276,17 @@ This rule applies to:
 - changes to legacy component boundaries (`politics`, `enforcer`, Casbin).
 
 The only exceptions are trivial refactors that do not change external behavior, error messages, or authorization logic.
+
+The IDE uses auth-service's `config.yaml` and existing `containers-up` command;
+tests read pytests' `config.yaml`. `RUN_ID` is not required. For IDE debugging, run
+`containers-up` in auth-service, then start the service manually in the IDE.
+`integration-run` with `AUTH_MODE=host` checks readiness and runs pytest with the
+data fixture. Dependencies remain running regardless of the result; stop them with
+`containers-down` in auth-service. A successful local container run removes its
+resources; CI removes them regardless of the outcome. Do not reintroduce generated
+configuration files or dynamic ports for local debugging.
+
+For host/host, do not require `integration-up` or invoke Docker: seed and pytest run
+on the host with the same `PYTEST_CONFIG` (default: pytests' `config.yaml`). Do not
+rewrite or commit the user's local YAML files. Data is prepared by pytest or a
+standalone Make command. Compose overlays are only needed for container or mixed modes.

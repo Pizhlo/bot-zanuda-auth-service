@@ -52,7 +52,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the Docker image
-        run: docker build . -t pull_request:$(date +%s)
+        env:
+          BUILD_IMAGE: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO_NAME }}:build-${{ github.sha }}
+        run: >-
+          docker build . -t "$BUILD_IMAGE"
+          --build-arg VERSION=${GITHUB_SHA}
+          --build-arg BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          --build-arg GIT_COMMIT=${GITHUB_SHA}
 
   # пуш образа в Docker Hub
   push-image:
@@ -78,10 +84,19 @@ jobs:
           tags: type=raw,value=latest
           labels: latest
 
+      # Сервис требует непустые метаданные; дата передаётся в публикуемый бинарник.
+      - name: Build timestamp
+        id: build-time
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          build-args: |
+            VERSION=${{ github.sha }}
+            BUILD_DATE=${{ steps.build-time.outputs.value }}
+            GIT_COMMIT=${{ github.sha }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
