@@ -22,6 +22,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// errorResponse - ответ для случая, когда операция прошла неуспешно.
+type errorResponse struct {
+	RequestID    uuid.UUID      `json:"request_id"`
+	Status       model.Status   `json:"status"`
+	Result       model.Result   `json:"result"`
+	Resource     model.Resource `json:"resource"`
+	ErrorMessage errorMessage   `json:"error"`
+	Meta         model.Meta     `json:"meta"`
+}
+
+type errorMessage struct {
+	Code    audit.ErrorCode `json:"code"`
+	Message string          `json:"message"`
+	Details struct {
+		Operation          model.Operation `json:"operation"`
+		*fga.DetailedError `json:"detailed_error"`
+	} `json:"details"`
+}
+
+func newMessage(code audit.ErrorCode, message string, operation model.Operation, detailedError *fga.DetailedError) errorMessage {
+	return errorMessage{
+		Code:    code,
+		Message: message,
+		Details: struct {
+			Operation          model.Operation `json:"operation"`
+			*fga.DetailedError `json:"detailed_error"`
+		}{
+			Operation:     operation,
+			DetailedError: detailedError,
+		},
+	}
+}
+
 func TestNewResourceHandler(t *testing.T) {
 	t.Parallel()
 
@@ -458,259 +491,6 @@ func TestResourceHandler_UpdateResource_InvalidBody(t *testing.T) {
 	require.Equal(t, "cannot bind request", errResp["error"])
 }
 
-func TestResourceHandler_CreateErrorResponse(t *testing.T) {
-	t.Parallel()
-
-	requestID := uuid.New()
-	decisionID := uuid.New()
-	noteID := uuid.New()
-
-	updateRequest := model.UpdateResourceRequest{
-		RequestID:      requestID,
-		IdempotencyKey: "idempotency-key",
-		TelegramID:     12345,
-		DecisionID:     decisionID,
-		Resource:       model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-		Operation:      model.OperationCreate,
-		ChangeType:     model.ChangeTypeResourceAdded,
-	}
-
-	meta := model.Meta{
-		AuthModelID: "model-id",
-	}
-
-	expectedErrResp := errorResponse{
-		RequestID:    requestID,
-		Status:       model.StatusError,
-		Result:       model.ResultFailed,
-		Resource:     updateRequest.Resource,
-		ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil),
-		Meta:         meta,
-	}
-
-	handler, err := NewResourceHandler(WithResourceService(mocks.NewMockresourceService(gomock.NewController(t))))
-	require.NoError(t, err)
-
-	errResp := handler.createErrorResponse(requestID, model.StatusError, model.ResultFailed, updateRequest.Resource, newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil), meta)
-
-	require.Equal(t, expectedErrResp, errResp)
-}
-
-func TestResponseFromError(t *testing.T) {
-	t.Parallel()
-
-	requestID := uuid.New()
-	noteID := uuid.New()
-	meta := model.Meta{AuthModelID: "model-id"}
-
-	req := model.UpdateResourceRequest{
-		RequestID:  requestID,
-		Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-		Operation:  model.OperationCreate,
-		ChangeType: model.ChangeTypeResourceAdded,
-	}
-	resp := model.UpdateResourceResponse{Meta: meta}
-
-	detailedErr := &fga.DetailedError{
-		Err:     fga.ErrOwnerRequired,
-		Message: "owner is required",
-		Value:   "empty owner",
-	}
-	// Err не сериализуется в JSON (json:"-").
-	detailedErrInResponse := &fga.DetailedError{
-		Message: "owner is required",
-		Value:   "empty owner",
-	}
-
-	tests := []struct {
-		name          string
-		err           error
-		detailedError *fga.DetailedError
-		wantStatus    int
-		wantErrResp   errorResponse
-	}{
-		{
-			name:       "resource already exists or not found",
-			err:        fga.ErrResounceAlreadyExistsOrNotFound,
-			wantStatus: http.StatusConflict,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResounceAlreadyExistsOrNotFound.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "no tuples to write or delete",
-			err:        fga.ErrNoTuplesToWriteOrDelete,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "user not found",
-			err:        fga.ErrUserNotFound,
-			wantStatus: http.StatusNotFound,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeUserNotFound, fga.ErrUserNotFound.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:          "owner required with detailed error",
-			err:           fga.ErrOwnerRequired,
-			detailedError: detailedErr,
-			wantStatus:    http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeOwnerRequired, fga.ErrOwnerRequired.Error(), req.Operation, detailedErrInResponse),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "parent required",
-			err:        fga.ErrParentRequired,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeParentRequired, fga.ErrParentRequired.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "change type invalid",
-			err:        fga.ErrChangeTypeInvalid,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeChangeTypeInvalid, fga.ErrChangeTypeInvalid.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "event type invalid",
-			err:        fga.ErrEventTypeInvalid,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeEventTypeInvalid, fga.ErrEventTypeInvalid.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "parent not allowed",
-			err:        fga.ErrParentNotAllowed,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeParentNotAllowed, fga.ErrParentNotAllowed.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "resource empty",
-			err:        fga.ErrResourceEmpty,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeResourceEmpty, fga.ErrResourceEmpty.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "owner type invalid",
-			err:        fga.ErrOwnerTypeInvalid,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeOwnerTypeInvalid, fga.ErrOwnerTypeInvalid.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "parent type invalid",
-			err:        fga.ErrParentTypeInvalid,
-			wantStatus: http.StatusBadRequest,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrCodeParentTypeInvalid, fga.ErrParentTypeInvalid.Error(), req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-		{
-			name:       "internal server error",
-			err:        errors.New("unexpected"),
-			wantStatus: http.StatusInternalServerError,
-			wantErrResp: errorResponse{
-				RequestID:    requestID,
-				Status:       model.StatusError,
-				Result:       model.ResultFailed,
-				Resource:     req.Resource,
-				ErrorMessage: newMessage(audit.ErrInternalServerError, "internal server error", req.Operation, nil),
-				Meta:         meta,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			handler, err := NewResourceHandler(WithResourceService(mocks.NewMockresourceService(gomock.NewController(t))))
-			require.NoError(t, err)
-
-			e := echo.New()
-			httpReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", nil)
-			rec := httptest.NewRecorder()
-			c := e.NewContext(httpReq, rec)
-
-			err = handler.responseFromError(c, req, resp, tt.err, tt.detailedError)
-			require.NoError(t, err)
-			require.Equal(t, tt.wantStatus, rec.Code)
-
-			var got errorResponse
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-			require.Equal(t, tt.wantErrResp, got)
-		})
-	}
-}
-
 func TestNewMessage(t *testing.T) {
 	t.Parallel()
 
@@ -724,23 +504,127 @@ func TestNewMessage(t *testing.T) {
 		}{Operation: model.OperationCreate, DetailedError: nil},
 	}, message)
 }
-func TestErrResponse(t *testing.T) {
+
+func TestResourceHandler_ErrorJSON(t *testing.T) {
 	t.Parallel()
 
-	e := echo.New()
+	requestID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	noteID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
+	request := model.UpdateResourceRequest{
+		RequestID:  requestID,
+		TelegramID: 12345,
+		Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
+		Operation:  model.OperationCreate,
+		ChangeType: model.ChangeTypeResourceAdded,
+	}
+	detailed := &fga.DetailedError{Err: fga.ErrOwnerRequired, Message: "missing owner", Value: "empty owner"}
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewBufferString(""))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    audit.ErrorCode
+		message string
+		details string
+	}{
+		{
+			name:    "plain",
+			err:     fga.ErrOwnerRequired,
+			status:  http.StatusBadRequest,
+			code:    audit.ErrCodeOwnerRequired,
+			message: "owner is required",
+			details: "null",
+		},
+		{
+			name:    "not found",
+			err:     fga.ErrUserNotFound,
+			status:  http.StatusNotFound,
+			code:    audit.ErrCodeUserNotFound,
+			message: "user not found",
+			details: "null",
+		},
+		{
+			name:    "conflict",
+			err:     fga.ErrResounceAlreadyExistsOrNotFound,
+			status:  http.StatusConflict,
+			code:    audit.ErrCodeResourceAlreadyExistsOrNotFound,
+			message: "new resource already exists or deleted resource not found",
+			details: "null",
+		},
+		{
+			name:    "unknown",
+			err:     errors.New("private failure"),
+			status:  http.StatusInternalServerError,
+			code:    audit.ErrInternalServerError,
+			message: "internal server error",
+			details: "null",
+		},
+		{
+			name:    "detailed",
+			err:     detailed,
+			status:  http.StatusBadRequest,
+			code:    audit.ErrCodeOwnerRequired,
+			message: "owner is required",
+			details: `{"message":"missing owner","value":"empty owner"}`,
+		},
+		{
+			name:    "wrapped detailed",
+			err:     fmt.Errorf("outer: %w", detailed),
+			status:  http.StatusBadRequest,
+			code:    audit.ErrCodeOwnerRequired,
+			message: "owner is required",
+			details: `{"message":"missing owner","value":"empty owner"}`,
+		},
+		{
+			name:    "wrapped sentinel",
+			err:     fmt.Errorf("outer: %w", fga.ErrOwnerRequired),
+			status:  http.StatusBadRequest,
+			code:    audit.ErrCodeOwnerRequired,
+			message: "outer: owner is required",
+			details: "null",
+		},
+		{
+			name: "unknown detailed",
+			err: &fga.DetailedError{
+				Err:     errors.New("private failure"),
+				Message: "details",
+				Value:   nil,
+			},
+			status:  http.StatusInternalServerError,
+			code:    audit.ErrInternalServerError,
+			message: "internal server error",
+			details: `{"message":"details","value":null}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+			svc := mocks.NewMockresourceService(gomock.NewController(t))
+			svc.EXPECT().UpdateResource(gomock.Any(), request).
+				Return(model.UpdateResourceResponse{Meta: model.Meta{AuthModelID: "model-id"}}, tt.err)
+			handler, err := NewResourceHandler(WithResourceService(svc))
+			require.NoError(t, err)
 
-	err := errResponse(c, http.StatusBadRequest, fga.ErrNoTuplesToWriteOrDelete)
-	require.NoError(t, err)
+			body, err := json.Marshal(request)
+			require.NoError(t, err)
 
-	var errResp map[string]string
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewReader(body))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			req.Header.Set(userIDHeader, "12345")
 
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errResp))
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, fga.ErrNoTuplesToWriteOrDelete.Error(), errResp["error"])
+			rec := httptest.NewRecorder()
+			require.NoError(t, handler.UpdateResource(echo.New().NewContext(req, rec)))
+			require.Equal(t, tt.status, rec.Code)
+
+			want := fmt.Sprintf(`{
+				"request_id":"11111111-1111-4111-8111-111111111111",
+				"status":"error","result":"failed",
+				"resource":{"id":"22222222-2222-4222-8222-222222222222","type":"note"},
+				"error":{"code":%q,"message":%q,"details":{"operation":"create","detailed_error":%s}},
+				"meta":{"auth_model_id":"model-id"}
+			}`, tt.code, tt.message, tt.details)
+			require.JSONEq(t, want, rec.Body.String())
+		})
+	}
 }

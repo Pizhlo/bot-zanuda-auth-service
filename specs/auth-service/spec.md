@@ -457,6 +457,7 @@ The error response SHALL contain:
 | `message` | Yes | Human-readable error message |
 | `request_id` | When available | Request correlation identifier |
 
+
 For OpenFGA unavailability:
 
 - HTTP status SHALL be 503 Service Unavailable.
