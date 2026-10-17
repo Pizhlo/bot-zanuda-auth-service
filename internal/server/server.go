@@ -183,7 +183,7 @@ func (s *Server) createRoutes() error {
 	}
 
 	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{Skipper: skipper}))
-	e.Use(middleware.Logger())
+	e.Use(requestLogger())
 
 	e.Use(echoprometheus.NewMiddleware("webserver")) // adds middleware to gather metrics
 	e.GET("/metrics", echoprometheus.NewHandler())   // adds route to serve gathered metrics
