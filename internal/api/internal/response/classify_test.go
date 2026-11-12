@@ -22,12 +22,12 @@ func TestClassify(t *testing.T) {
 		want classification
 	}{
 		{
-			name: "ErrResounceAlreadyExistsOrNotFound",
-			err:  fga.ErrResounceAlreadyExistsOrNotFound,
+			name: "ErrResourceAlreadyExistsOrNotFound",
+			err:  fga.ErrResourceAlreadyExistsOrNotFound,
 			want: classification{
 				StatusCode: http.StatusConflict,
 				Code:       audit.ErrCodeResourceAlreadyExistsOrNotFound,
-				Message:    fga.ErrResounceAlreadyExistsOrNotFound.Error(),
+				Message:    fga.ErrResourceAlreadyExistsOrNotFound.Error(),
 			},
 		},
 		{

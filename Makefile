@@ -22,7 +22,7 @@ mocks:
 # Сгенерировать Swagger-документацию из кода обработчиков.
 swag:
 	@echo "> generating swagger documentation..."
-	swag init -g cmd/app/main.go --md ./docs --parseInternal  --parseDependency --parseDepth 2 
+	$(GO) run github.com/swaggo/swag/cmd/swag@$(shell $(GO) list -m -f '{{.Version}}' github.com/swaggo/swag) init -g cmd/app/main.go --md ./docs --parseInternal --parseDependency --parseDepth 2
 	@echo "> swagger documentation generated successfully"
 
 # Установить линтеры и создать локальные сертификаты Vault.

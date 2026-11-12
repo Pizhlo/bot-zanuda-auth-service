@@ -17,6 +17,7 @@ import (
 // ResourceHandler - хендлер обновления ресурсов.
 type ResourceHandler struct {
 	resourceService resourceService // сервис обновления ресурса
+	decisionService decisionService
 }
 
 // resourceService - сервис обновления ресурса.

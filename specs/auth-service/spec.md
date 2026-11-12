@@ -16,10 +16,11 @@ The current service provides:
 
 1. Service-token issuance using client credentials.
 2. Resource and relationship synchronization to OpenFGA.
+3. Single-action authorization through `POST /v0/decisions/check`.
 
 - OpenFGA is the authoritative relationship and authorization model for spaces, notes, reminders, and members.
 - The current implemented resource synchronization API writes relationships to OpenFGA.
-- The request-based authorization check API is planned and is not currently implemented.
+- The single-check API follows the contract below; unfinished legacy check routes are not public aliases.
 
 ## Architecture Overview
 
@@ -33,8 +34,8 @@ The current service provides:
 - The authorization service validates the bot token forwarded by the web server before using `X-Telegram-User-Id`.
 - The authorization service maps Telegram user ID from `X-Telegram-User-Id` to an internal user ID in the application database.
 - The current resource synchronization API writes resource relationships to OpenFGA.
-- A future authorization check API SHALL query OpenFGA using the internal user ID, the mapped relation, and the target object.
-- A future authorization check API SHALL return an `allow` or `deny` decision.
+- The authorization check API SHALL query OpenFGA using the internal user ID, the mapped relation, and the target object, except space:create, which is permitted to every registered user.
+- The authorization check API SHALL return an `allow` or `deny` decision, constrained by the field policy for update actions.
 - Tokens are issued to service clients; the bot is the currently supported service client.
 - Telegram end users do not receive service tokens.
 - The OpenFGA model is defined in `./fga/auth-model.fga`.
@@ -55,9 +56,11 @@ The OpenFGA model defines the following space roles:
 - `editor`: Can create notes and reminders and inherits viewer permissions.
 - `viewer`: Can view accessible notes and reminders.
 
-### Action Categories (Planned)
+### Action Categories
 
-The following actions belong to the planned authorization check API.
+The following actions belong to the single-check API.
+
+**Spaces:** create/read/update/delete; personal space deletion is always forbidden.
 
 **Notes:**
 
@@ -80,9 +83,9 @@ The following actions belong to the planned authorization check API.
 - `member:remove` — remove a user from a space.
 - `member:edit` — change a user's role in a space to `viewer`, `editor`, or `admin`.
 
-### Deletion Semantics (Planned)
+### Deletion Semantics
 
-The following rules apply to the planned deletion checks.
+The following rules apply to deletion checks. Direct ownership of a record in a personal space grants no rights to a user other than that space owner. Personal spaces themselves cannot be deleted, including by their owner.
 
 **Notes:**
 
@@ -102,19 +105,11 @@ These rules are enforced by the OpenFGA model via the `can_delete` relation on `
 
 OpenFGA SHALL be the source of truth for authorization of spaces, notes, reminders, and members.
 
-Casbin MAY be used for future domain-specific authorization rules that are not expressible in OpenFGA.
+Casbin SHALL constrain update fields after OpenFGA permits the action. The embedded model and policy are immutable per build and contain no user-role assignments. The package `internal/service/enforcer` owns this field policy; legacy `internal/service/politics` SHALL NOT be used by new authorization code.
 
-Casbin SHALL NOT replace or duplicate OpenFGA authorization for spaces, notes, reminders, or members.
+Allowed update fields are note: `text,title`, reminder: `remind_at,title`, space: `name`. These lists apply equally to all authorized users; all other fields are forbidden, including technical fields. The reminder list is provisional for the future data model. Policy changes require a new build and change `policy_version`.
 
-The existing `internal/service/politics` implementation is legacy and is not an active authorization source.
-
-The `internal/service/enforcer` package is reserved for future Casbin integration and SHALL NOT be used as an alternative implementation of the OpenFGA model.
-
-The root `casbin_model.conf` is reserved for planned Casbin-based domain-specific rules.
-
-It SHALL NOT be used for current space, note, reminder, or member authorization.
-
-It SHALL NOT be treated as the source of truth while OpenFGA is authoritative for those resources.
+Personal/shared types are trusted OpenFGA metadata. Exactly one type is required; missing or conflicting types grant no access. Personal spaces and their contents are accessible only to their owner, cannot have members, and cannot be deleted. Shared spaces retain the owner/admin/editor/viewer hierarchy. The owner may update the name of either type; only shared spaces can be deleted. Deleting a personal-space record remains permitted to the space owner.
 
 ## Service Token Issuance
 
@@ -255,7 +250,10 @@ REQ-SYNC-019: The service SHALL use `context.source_service`, `context.event_typ
 
 REQ-SYNC-020: The service SHALL not log secrets from incoming headers or token values.
 
-## UpdateResource Idempotency
+## UpdateResource Idempotency (separate future task)
+
+The requirements in this section are a future contract, not implemented behavior. By explicit BZ-167 scope decision, reservation, replay, TTL, fingerprint storage and recovery are deferred to a separate task. The existing key remains request/response metadata; BZ-167 SHALL NOT claim these guarantees.
+
 
 ### Idempotency Scope
 
@@ -392,93 +390,61 @@ The implementation SHALL include table-driven tests for:
 - conflict not creating an audit record;
 - only the reservation owner calling OpenFGA.
 
-## Authorization Check Mapping (Planned)
+## Single-action Authorization API
 
-The following mapping describes the intended future authorization check API.
+`POST /v0/decisions/check` accepts one action and returns one complete decision. It does not mutate business data, create users or write FGA tuples. The unfinished `/api/v0/resources/decisions/check` route is removed.
 
-It is not part of the current supported API.
+### Trusted caller and strict request
 
-For each authorization request, the future service SHALL:
+The caller SHALL present a valid active service-client JWT with scope `bot`. Scope is a space-separated list. Token verification precedes user lookup. `X-Telegram-User-Id` SHALL be a positive decimal identifier from the trusted bot route, mapped to an internal UUID. The mapped UUID SHALL equal subject.id and SHALL be used consistently in checks and audit.
 
-1. Validate the action and its required identifiers.
-2. Validate the bot token.
-3. Resolve `X-Telegram-User-Id` to an internal user ID.
-4. Map the action to the OpenFGA object and relation below.
-5. Perform the OpenFGA check.
-6. Use the OpenFGA result as the authorization decision.
-7. Create an audit record for a completed allow or deny check.
+Required JSON fields: request_id (nonzero UUID), subject.type (`user`), subject.id (nonzero UUID), action.name, resource.type, resource.id (nonzero UUID even for create). Unknown fields, unknown attributes, nulls and wrong types SHALL be rejected with 400. There is no subject.relation, is_admin or top-level user_id.
 
-| Action | Required request fields | OpenFGA object | Required relation |
-|---|---|---|---|
-| `note:create` | `space_id` | `space:<space_id>` | `can_create_note` |
-| `note:read` | `note_id` | `note:<note_id>` | `can_view` |
-| `note:update` | `note_id` | `note:<note_id>` | `can_update` |
-| `note:delete` | `note_id` | `note:<note_id>` | `can_delete` |
-| `reminder:create` | `space_id` | `space:<space_id>` | `can_create_reminder` |
-| `reminder:read` | `reminder_id` | `reminder:<reminder_id>` | `can_view` |
-| `reminder:update` | `reminder_id` | `reminder:<reminder_id>` | `can_update` |
-| `reminder:stop` | `reminder_id` | `reminder:<reminder_id>` | `can_stop` |
-| `reminder:delete` | `reminder_id` | `reminder:<reminder_id>` | `can_delete` |
-| `member:add` | `space_id`, `target_user_id`, `role` | `space:<space_id>` | `can_manage_members` |
-| `member:remove` | `space_id`, `target_user_id` | `space:<space_id>` | `can_manage_members` |
-| `member:edit` | `space_id`, `target_user_id`, `role` | `space:<space_id>` | `can_manage_members` |
+Optional subject.attributes accepts only telegram_user_id, which must match the header. Optional context accepts service/client/ip/trace_id/time; ip and time use IP/RFC3339 syntax and are informational only. Optional objects may be omitted or empty. Explicit null is invalid.
 
-For note and reminder read, update, delete, and stop actions, `space_id` MAY be included as optional audit context but SHALL NOT replace `note_id` or `reminder_id` in the OpenFGA check.
+Action attributes: field_mask (nonempty array of nonempty names) is mandatory only for update; role is required only for member:add/edit and must be viewer/editor/admin. Resource attributes: space_id is required for note/reminder:create and member actions; optional for existing note/reminder, where it never replaces the stored parent. Space requests have no resource attributes; type comes from trusted synchronization, not this request.
 
-## Authorization Response Contract (Planned)
+### Action mapping
 
-This contract applies only to completed authorization checks.
+| Resource/action | Checked object | Relation |
+|---|---|---|
+| space:create | none | registered-user rule; future owner is the subject |
+| space:read | space:resource.id | can_view |
+| space:update | space:resource.id | can_manage_space |
+| space:delete | space:resource.id | can_delete; owner of shared only |
+| note:create | space:resource.attributes.space_id | can_create_note |
+| note:read/update/delete | note:resource.id | can_view/can_update/can_delete |
+| reminder:create | space:resource.attributes.space_id | can_create_reminder |
+| reminder:read/update/delete/stop | reminder:resource.id | can_view/can_update/can_delete/can_stop |
+| member:add/edit/remove | space:resource.attributes.space_id | can_manage_members |
 
-A successful authorization response SHALL contain:
+For member actions resource.id is target_user_id; owner targets are forbidden for all three actions. Administrators may manage all other members including admin roles and their own membership. All member actions on personal are denied. Unknown objects return deny without a separate existence lookup. The check does not ensure that a new UUID or target user exists in the business store.
 
-| Field | Required | Rules |
-|---|---:|---|
-| `decision` | Yes | `allow` or `deny` |
-| `reason_code` | For `deny` only | Machine-readable denial code |
-| `reason_code` | For `allow` | Optional |
+The order is authentication, structural validation, trusted identity, FGA permission, protected member-owner check, then Casbin for update. A relational deny short-circuits field checks. Any forbidden field denies the entire operation. Mask order and duplicate names do not change semantics. Technical/unknown nonempty field names cause 200 deny, while malformed masks cause 400.
 
-REQ-RESPONSE-001: The system SHALL return a `decision` field with value `allow` or `deny` for every completed authorization check.
+### Options and replay
 
-REQ-RESPONSE-002: For `deny` decisions, the system SHALL include a `reason_code` field.
+include_reasons defaults to false. consistency accepts higher_consistency (default) and minimize_latency, applied to every FGA query including target-owner checks. minimize_latency can observe stale relationships. Every request is computed again and receives a new decision_id, including requests reusing request_id. Auth-service does not cache decisions. Only space:create skips FGA, including when FGA is unavailable after startup.
 
-REQ-RESPONSE-003: For `allow` decisions, the system MAY include a `reason_code` field.
+### Authorization response
 
-## Error Response Contract
+Completed checks return HTTP 200 with request_id, a new UUID decision_id, string result (allow/deny), matching boolean allow, reasons (always an array) and meta. Meta contains trusted subject, requested action/resource as type:UUID, policy_version, authorization_model_id and nonnegative latency_ms. For create/member the checked FGA object may differ from meta.resource and is recorded separately in audit. space:create reports the pinned model ID without claiming to have queried it.
 
-The Error Response Contract applies to authentication, validation, identity-resolution, idempotency, dependency, and infrastructure failures.
+With include_reasons=false, reasons is []. With true, reasons contains stable code/message objects: allowed_via_fga_relation and allowed_fields for an allowed update, allowed_for_registered_user for space:create, denied_by_fga_relation, forbidden_fields or protected_space_owner for a denial. Messages SHALL NOT claim an unobserved role-inheritance path. A denial explains the final failing stage, not previous successful stages.
 
-Error responses SHALL NOT be treated as authorization decisions and SHALL NOT be required to contain `decision` or `reason_code`.
+Policy version is derived from the actual embedded Casbin model and policy. Invalid policy prevents readiness; a runtime policy error is a dependency failure, not a denial. decision_id is correlation metadata, not a consumable permit or a guarantee that permissions remain unchanged before a write.
 
-The error response SHALL contain:
+### Error response
 
-| Field | Required | Rules |
-|---|---:|---|
-| `error_code` | Yes | Stable machine-readable code |
-| `message` | Yes | Human-readable error message |
-| `request_id` | When available | Request correlation identifier |
+Check errors use `{error_code,message,request_id?}` without result/allow. request_id is included only when parsed. Invalid requests/headers/masks/attributes use 400 invalid_request; missing or invalid JWT uses 401 unauthorized; missing client access/scope uses 403 forbidden; subject mismatch uses 403 subject_mismatch; unknown Telegram user uses 404 user_not_found, without registration. Dependency failures use 503 identity_store_unavailable/openfga_unavailable/policy_unavailable. Unexpected failures use safe 500 internal_error.
 
+This new envelope SHALL NOT replace existing synchronization/other endpoint envelopes. New synchronization invariant failures use the existing resource-envelope with validation HTTP 400; existing resource conflicts preserve HTTP 409.
 
-For OpenFGA unavailability:
+### Space synchronization and migration
 
-- HTTP status SHALL be 503 Service Unavailable.
-- `error_code` SHALL be `openfga_unavailable`.
-- The response SHALL NOT contain `decision`.
-- The response SHALL NOT be required to contain `reason_code`.
-- The failure SHALL be logged without secrets.
+New create-space synchronization SHALL require resource.attributes.space_type (personal/shared), owner.type=user and owner.id equal to the trusted mapped subject. Owner and one type marker are written in a single FGA Write. Type is immutable through normal updates. Protected personal deletion, personal membership and changes to a space owner's membership SHALL be rejected before writes, regardless of decision_id. Missing/conflicting trusted type never permits a protected write. Checks use the same pinned FGA model as synchronization.
 
-For an idempotency conflict:
-
-- HTTP status SHALL be 409 Conflict.
-- `error_code` SHALL be `idempotency_conflict`.
-- The response SHALL NOT contain `decision`.
-- The response SHALL NOT be required to contain `reason_code`.
-
-For an active idempotency reservation:
-
-- HTTP status SHALL be 409 Conflict.
-- `error_code` SHALL be `idempotency_in_progress`.
-- The response SHALL NOT contain `decision`.
-- The response SHALL NOT be required to contain `reason_code`.
+Existing spaces require an explicit trusted export of space_id,owner_id,space_type before activation. Migration SHALL support dry run and repeated application, validate completeness/ownership, and never infer shared from existing memberships. A compatible transitional model introduces metadata before the strict model is activated. Rollback disables the endpoint but does not restore permissive personal-space rules. This is not an idempotency or PostgreSQL/FGA atomicity guarantee.
 
 ## Scope Validation
 
@@ -494,7 +460,7 @@ The service SHALL return the effective scopes in the successful login response.
 
 ## Audit Record Contract
 
-For every completed planned OpenFGA authorization check, including both `allow` and `deny` decisions, the service SHALL create an audit record.
+For every completed OpenFGA authorization check, including both `allow` and `deny` decisions, the service SHALL create an audit record.
 
 Every authorization audit record SHALL contain:
 
@@ -515,54 +481,15 @@ For `member:add` and `member:edit`, the audit record SHALL also contain the requ
 
 Authentication, header-validation, identifier-validation, identity-resolution, idempotency, and infrastructure failures SHALL be logged without tokens, passwords, or other secrets.
 
-## Planned Authorization Scenarios
+## Authorization Scenarios
 
-The following scenarios describe the planned authorization check API and are not current implemented API scenarios.
-
-### Scenario: Delete note - allowed for note owner
-
-- GIVEN a bot with a valid authentication token
-- AND the request includes `X-Telegram-User-Id: 123456`
-- AND Telegram user ID 123456 is mapped to internal user ID `550e8400-e29b-41d4-a716-446655440000`
-- AND internal user `550e8400-e29b-41d4-a716-446655440000` is the owner of `note:<note-uuid>`
-- WHEN the bot sends an authorization request with action="note:delete" and note_id=<note-uuid>
-- AND OpenFGA confirms relation `can_delete` for the internal user on `note:<note-uuid>`
-- THEN the system returns 200 OK with decision="allow"
-- AND the response MAY contain reason_code="allowed"
-- AND the system writes an audit record with the checked object `note:<note-uuid>` and relation `can_delete`
-
-### Scenario: Delete note - denied for editor who is not owner
-
-- GIVEN a bot with a valid authentication token
-- AND the request includes `X-Telegram-User-Id: 456789`
-- AND Telegram user ID 456789 is mapped to internal user ID `6ba7b810-9dad-11d1-80b4-00c04fd430c8`
-- AND the internal user is an editor in the containing space
-- AND the internal user is not the owner of `note:<note-uuid>`
-- WHEN the bot sends an authorization request with action="note:delete" and note_id=<note-uuid>
-- AND OpenFGA denies relation `can_delete` for the internal user on `note:<note-uuid>`
-- THEN the system returns 200 OK with decision="deny"
-- AND the response includes reason_code="insufficient_permissions"
-- AND the system writes an audit record with the checked object `note:<note-uuid>` and relation `can_delete`
-
-### Scenario: Add member - allowed
-
-- GIVEN a bot with a valid authentication token
-- AND the request includes `X-Telegram-User-Id: 123456`
-- AND Telegram user ID 123456 is mapped to internal user ID `550e8400-e29b-41d4-a716-446655440000`
-- AND the internal user can manage members in `space:<space-uuid>`
-- WHEN the bot sends an authorization request with action="member:add", space_id=<space-uuid>, target_user_id=<target-user-uuid>, and role="editor"
-- AND OpenFGA confirms relation `can_manage_members` on `space:<space-uuid>`
-- THEN the system returns 200 OK with decision="allow"
-- AND the system writes an audit record containing `target_user_id=<target-user-uuid>` and requested role="editor"
-
-### Scenario: Authorization check dependency unavailable
-
-- GIVEN a valid planned authorization request
-- WHEN OpenFGA is unavailable or times out
-- THEN the system returns 503 Service Unavailable
-- AND the response contains `error_code="openfga_unavailable"`
-- AND the response does not contain an authorization `decision`
-- AND the system logs the dependency failure without logging secrets
+- An authorized note update with text,title returns allow; adding timestamp denies the entire operation.
+- An authorized reminder update with remind_at,title returns allow; changing created/last_edit is denied.
+- A personal-space owner receives deny for space:delete but may delete a note inside it.
+- A foreign direct note owner cannot access a note inside personal; direct ownership in shared still works without membership.
+- Registered users may create a new space without a FGA check; no business row or tuple is created by check.
+- Member operations never change the owner's membership or assign owner; personal never accepts members.
+- Dependency failures return an error, not allow/deny; RabbitMQ publication failure does not replace a completed decision.
 
 ## Planned Admin Scenarios
 
@@ -587,3 +514,12 @@ They SHALL remain planned until admin identity, admin authentication, resources,
 - THEN the system returns 200 OK
 - AND the response is saved and visible to the user
 - AND the system creates an audit record
+## Completed-decision Audit
+
+Every allow/deny logs caller, trusted subject, requested resource/action, checked object/relation, result, server time, request_id, decision_id and both policy versions. Member events add target_user_id and requested role where applicable. space:create records no checked FGA object/relation. A completed event is logged locally and sent to RabbitMQ on a bounded best-effort basis; delivery failure is logged without changing the result. Client context cannot replace trusted caller/time. Tokens, JWT claims, passwords and secrets are never logged.
+
+## API and rollout references
+
+The exact required/optional field table and checked JSON examples are in [docs/decisions-api.md](../../docs/decisions-api.md). The migration tool, trusted-export format, activation gates, and rollback procedure are in [docs/space-types-migration.md](../../docs/space-types-migration.md). Runtime `openfga.model_id` pins a model explicitly; without it the model selected at startup stays fixed for that process. It cannot be combined with `apply_model_on_start`. Startup compares the pinned model with the strict embedded model and refuses to serve check with the old/transition model.
+
+The existing synchronization implementation currently writes resource creation tuples. BZ-167 adds space type and privacy guards, not general update/delete/member tuple writers or the separate idempotency mechanism. Normative sync requirements outside those implemented paths remain future work.

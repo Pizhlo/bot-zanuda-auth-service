@@ -28,6 +28,7 @@ type Config struct {
 
 // OpenFGA - конфигурация OpenFGA.
 type OpenFGA struct {
+	ModelID            string `yaml:"model_id"`                                // закреплённая существующая модель; несовместимо с apply_model_on_start
 	APIURL             string `yaml:"api_url" validate:"required,url"`         // URL для API OpenFGA
 	AuthorizationModel string `yaml:"authorization_model" validate:"required"` // путь к файлу с моделью авторизации
 	StoreID            string `yaml:"store_id" validate:"omitempty"`           // ID store; если пусто — ищем или создаём по store_name

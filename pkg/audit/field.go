@@ -266,8 +266,10 @@ const (
 	ErrCodeWriteFailedDueToInvalidInput ErrorCode = "WRITE_FAILED_DUE_TO_INVALID_INPUT"
 	// ErrCodeResourceAlreadyExistsOrNotFound - код ошибки для случая, когда ресурс уже существует или не найден.
 	ErrCodeResourceAlreadyExistsOrNotFound ErrorCode = "RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND"
-	ErrNoTuplesToWriteOrDelete             ErrorCode = "NO_TUPLES_TO_WRITE_OR_DELETE"
-	ErrInternalServerError                 ErrorCode = "INTERNAL_SERVER_ERROR"
+	// ErrCodeValidationFailed - код ошибки для случая, когда validation failed.
+	ErrCodeValidationFailed    ErrorCode = "VALIDATION_FAILED"
+	ErrNoTuplesToWriteOrDelete ErrorCode = "NO_TUPLES_TO_WRITE_OR_DELETE"
+	ErrInternalServerError     ErrorCode = "INTERNAL_SERVER_ERROR"
 )
 
 // ErrorCodeField создает новое поле кода ошибки.

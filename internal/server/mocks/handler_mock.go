@@ -34,6 +34,20 @@ func (m *Mockhandler) EXPECT() *MockhandlerMockRecorder {
 	return m.recorder
 }
 
+// CheckDecision mocks base method.
+func (m *Mockhandler) CheckDecision(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecision", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckDecision indicates an expected call of CheckDecision.
+func (mr *MockhandlerMockRecorder) CheckDecision(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*Mockhandler)(nil).CheckDecision), c)
+}
+
 // FilterNotes mocks base method.
 func (m *Mockhandler) FilterNotes(c echo.Context) error {
 	m.ctrl.T.Helper()
@@ -238,6 +252,20 @@ func (m *MockresourcesEditor) EXPECT() *MockresourcesEditorMockRecorder {
 	return m.recorder
 }
 
+// CheckDecision mocks base method.
+func (m *MockresourcesEditor) CheckDecision(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecision", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckDecision indicates an expected call of CheckDecision.
+func (mr *MockresourcesEditorMockRecorder) CheckDecision(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*MockresourcesEditor)(nil).CheckDecision), c)
+}
+
 // UpdateResource mocks base method.
 func (m *MockresourcesEditor) UpdateResource(c echo.Context) error {
 	m.ctrl.T.Helper()
@@ -310,6 +338,20 @@ func NewMockmiddlewareHandler(ctrl *gomock.Controller) *MockmiddlewareHandler {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockmiddlewareHandler) EXPECT() *MockmiddlewareHandlerMockRecorder {
 	return m.recorder
+}
+
+// CheckDecisionToken mocks base method.
+func (m *MockmiddlewareHandler) CheckDecisionToken(next echo.HandlerFunc) echo.HandlerFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecisionToken", next)
+	ret0, _ := ret[0].(echo.HandlerFunc)
+	return ret0
+}
+
+// CheckDecisionToken indicates an expected call of CheckDecisionToken.
+func (mr *MockmiddlewareHandlerMockRecorder) CheckDecisionToken(next interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecisionToken", reflect.TypeOf((*MockmiddlewareHandler)(nil).CheckDecisionToken), next)
 }
 
 // CheckToken mocks base method.

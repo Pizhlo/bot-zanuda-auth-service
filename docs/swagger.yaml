@@ -1,13 +1,199 @@
-basePath: /api/v0
+basePath: /
 definitions:
+  auth-service_internal_api_internal_response.DecisionErrorBody:
+    properties:
+      error_code:
+        type: string
+      message:
+        type: string
+      request_id:
+        type: string
+    type: object
+  auth-service_internal_model.ActionName:
+    enum:
+    - create
+    - update
+    - delete
+    - read
+    - stop_reminder
+    - stop
+    - add
+    - edit
+    - remove
+    type: string
+    x-enum-varnames:
+    - ActionNameCreate
+    - ActionNameUpdate
+    - ActionNameDelete
+    - ActionNameRead
+    - ActionNameStopReminder
+    - ActionNameStop
+    - ActionNameAdd
+    - ActionNameEdit
+    - ActionNameRemove
+  auth-service_internal_model.CheckDecisionRequest:
+    properties:
+      action:
+        $ref: '#/definitions/auth-service_internal_model.DecisionAction'
+      context:
+        $ref: '#/definitions/auth-service_internal_model.DecisionContext'
+      options:
+        $ref: '#/definitions/auth-service_internal_model.DecisionOptions'
+      request_id:
+        type: string
+      resource:
+        $ref: '#/definitions/auth-service_internal_model.DecisionResource'
+      subject:
+        $ref: '#/definitions/auth-service_internal_model.DecisionSubject'
+    required:
+    - action
+    - request_id
+    - resource
+    - subject
+    type: object
+  auth-service_internal_model.CheckDecisionResponse:
+    properties:
+      allow:
+        type: boolean
+      decision_id:
+        type: string
+      meta:
+        $ref: '#/definitions/auth-service_internal_model.DecisionMeta'
+      reasons:
+        items:
+          $ref: '#/definitions/auth-service_internal_model.DecisionReason'
+        type: array
+      request_id:
+        type: string
+      result:
+        type: string
+    required:
+    - request_id
+    type: object
+  auth-service_internal_model.Consistency:
+    enum:
+    - higher_consistency
+    - minimize_latency
+    type: string
+    x-enum-varnames:
+    - HigherConsistency
+    - MinimizeLatency
+  auth-service_internal_model.DecisionAction:
+    properties:
+      attributes:
+        $ref: '#/definitions/auth-service_internal_model.DecisionActionAttributes'
+      name:
+        $ref: '#/definitions/auth-service_internal_model.ActionName'
+    required:
+    - name
+    type: object
+  auth-service_internal_model.DecisionActionAttributes:
+    properties:
+      field_mask:
+        items:
+          type: string
+        type: array
+      role:
+        enum:
+        - viewer
+        - editor
+        - admin
+        type: string
+    type: object
+  auth-service_internal_model.DecisionContext:
+    properties:
+      client:
+        type: string
+      ip:
+        type: string
+      service:
+        type: string
+      time:
+        type: string
+      trace_id:
+        type: string
+    type: object
+  auth-service_internal_model.DecisionMeta:
+    properties:
+      action:
+        $ref: '#/definitions/auth-service_internal_model.ActionName'
+      authorization_model_id:
+        type: string
+      latency_ms:
+        type: integer
+      policy_version:
+        type: string
+      resource:
+        type: string
+      subject:
+        type: string
+    required:
+    - action
+    - resource
+    - subject
+    type: object
+  auth-service_internal_model.DecisionOptions:
+    properties:
+      consistency:
+        allOf:
+        - $ref: '#/definitions/auth-service_internal_model.Consistency'
+        default: higher_consistency
+        enum:
+        - higher_consistency
+        - minimize_latency
+      include_reasons:
+        default: false
+        type: boolean
+    type: object
+  auth-service_internal_model.DecisionReason:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+    type: object
+  auth-service_internal_model.DecisionResource:
+    properties:
+      attributes:
+        $ref: '#/definitions/auth-service_internal_model.DecisionResourceAttributes'
+      id:
+        type: string
+      type:
+        $ref: '#/definitions/auth-service_internal_model.ResourceType'
+    required:
+    - id
+    - type
+    type: object
+  auth-service_internal_model.DecisionResourceAttributes:
+    properties:
+      space_id:
+        type: string
+    type: object
+  auth-service_internal_model.DecisionSubject:
+    properties:
+      attributes:
+        $ref: '#/definitions/auth-service_internal_model.DecisionSubjectAttributes'
+      id:
+        type: string
+      type:
+        $ref: '#/definitions/auth-service_internal_model.ResourceType'
+    required:
+    - id
+    - type
+    type: object
+  auth-service_internal_model.DecisionSubjectAttributes:
+    properties:
+      telegram_user_id:
+        type: string
+    type: object
   auth-service_internal_model.FilterNotesRequest:
     properties:
       note_ids:
         items:
-          type: integer
+          type: string
         type: array
       space_id:
-        type: integer
+        type: string
     type: object
   auth-service_internal_model.FilterNotesResponse:
     properties:
@@ -24,6 +210,20 @@ definitions:
       can_read:
         type: boolean
     type: object
+  auth-service_internal_model.ResourceType:
+    enum:
+    - space
+    - note
+    - reminder
+    - user
+    - member
+    type: string
+    x-enum-varnames:
+    - ResourceTypeSpace
+    - ResourceTypeNote
+    - ResourceTypeReminder
+    - ResourceTypeUser
+    - ResourceTypeMember
 host: localhost:8080
 info:
   contact: {}
@@ -31,7 +231,7 @@ info:
   title: Auth Service API
   version: "1.0"
 paths:
-  /auth/notes/filter:
+  /api/v0/auth/notes/filter:
     post:
       consumes:
       - application/json
@@ -80,13 +280,67 @@ paths:
       summary: Фильтрация записей, доступных пользователю
       tags:
       - notes
-  /health:
+  /api/v0/health:
     get:
       description: Проверить состояние сервера и соединения
       responses:
         "200":
           description: OK
       summary: Проверить состояние сервера и соединения
+  /v0/decisions/check:
+    post:
+      consumes:
+      - application/json
+      description: Проверка отношений и всей маски полей без изменения данных. Deny
+        возвращается с HTTP 200.
+      parameters:
+      - description: Доверенный Telegram ID
+        in: header
+        name: X-Telegram-User-Id
+        required: true
+        type: string
+      - description: Одно действие
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/auth-service_internal_model.CheckDecisionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/auth-service_internal_model.CheckDecisionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/auth-service_internal_api_internal_response.DecisionErrorBody'
+      security:
+      - BearerAuth: []
+      summary: Проверить одно действие
+      tags:
+      - decisions
 securityDefinitions:
   BearerAuth:
     in: header

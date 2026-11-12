@@ -212,6 +212,58 @@ func (s *writeRequestStub) GetContext() context.Context {
 	return s.ctx
 }
 
+type checkRequestStub struct {
+	ctx      context.Context
+	response *openFGAClient.ClientCheckResponse
+	err      error
+	body     *openFGAClient.ClientCheckRequest
+	options  *openFGAClient.ClientCheckOptions
+}
+
+func (s *checkRequestStub) Options(options openFGAClient.ClientCheckOptions) openFGAClient.SdkClientCheckRequestInterface {
+	s.options = &options
+	return s
+}
+
+func (s *checkRequestStub) Body(body openFGAClient.ClientCheckRequest) openFGAClient.SdkClientCheckRequestInterface {
+	s.body = &body
+	return s
+}
+
+func (s *checkRequestStub) Execute() (*openFGAClient.ClientCheckResponse, error) {
+	return s.response, s.err
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *checkRequestStub) GetAuthorizationModelIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.AuthorizationModelId
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *checkRequestStub) GetStoreIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.StoreId
+}
+
+func (s *checkRequestStub) GetBody() *openFGAClient.ClientCheckRequest {
+	return s.body
+}
+
+func (s *checkRequestStub) GetOptions() *openFGAClient.ClientCheckOptions {
+	return s.options
+}
+
+func (s *checkRequestStub) GetContext() context.Context {
+	return s.ctx
+}
+
 func TestNewClient(t *testing.T) {
 	t.Parallel()
 
@@ -1621,7 +1673,7 @@ func TestUpdateResource(t *testing.T) {
 				return stub
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrResounceAlreadyExistsOrNotFound)
+				require.ErrorIs(t, err, ErrResourceAlreadyExistsOrNotFound)
 			},
 			checkWrite: true,
 		},

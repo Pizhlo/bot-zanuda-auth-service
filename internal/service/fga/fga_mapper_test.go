@@ -82,11 +82,10 @@ func TestTuplesFromRequest(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		req         model.UpdateResourceRequest
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		req        model.UpdateResourceRequest
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name: "create note",
@@ -129,10 +128,9 @@ func TestTuplesFromRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesFromRequest(tt.req)
+			writes, err := tuplesFromRequest(tt.req)
 			tt.wantErr(t, err)
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }
@@ -146,12 +144,11 @@ func TestTuplesForCreate(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		resource    model.Resource
-		relations   model.Relation
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		resource   model.Resource
+		relations  model.Relation
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name:     "create note with owner and parent",
@@ -249,10 +246,9 @@ func TestTuplesForCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesForCreate(tt.resource, tt.relations)
+			writes, err := tuplesForCreate(tt.resource, tt.relations)
 			tt.wantErr(t, err)
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }

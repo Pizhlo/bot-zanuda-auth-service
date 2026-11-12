@@ -246,6 +246,14 @@ func (c *Client) createStore(ctx context.Context) error {
 // Если applyModelOnStart = true, то применяет модель и устанавливает modelID.
 // Иначе читает последнюю модель авторизации и устанавливает modelID.
 func (c *Client) resolveModel(ctx context.Context) error {
+	if c.modelID != "" {
+		if c.applyModelOnStart {
+			return fmt.Errorf("model_id and apply_model_on_start are mutually exclusive")
+		}
+
+		return c.fgaClient.SetAuthorizationModelId(c.modelID)
+	}
+
 	if c.applyModelOnStart {
 		if err := c.applyModelAndSetModelID(ctx); err != nil {
 			return fmt.Errorf("fga: error applying model: %w", err)
@@ -351,15 +359,17 @@ func (c *Client) writeAuthorizationModel(ctx context.Context, body openfga.Write
 	return data, nil
 }
 
-// ErrResounceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
+// ErrResourceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
 var (
-	ErrResounceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
+	ErrResourceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
 	ErrUserNotFound                    = errors.New("user not found")
+	ErrValidationFailed                = errors.New("validation failed")
 )
 
 const (
 	serviceName             = "fga"
 	operationUpdateResource = "update_resource"
+	operationCheckDecision  = "check_decision"
 )
 
 // UpdateResource обновляет ресурс в OpenFGA.
@@ -407,6 +417,11 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 		return model.UpdateResourceResponse{}, err
 	}
 
+	if err := c.guardSpace(ctx, req, userID); err != nil {
+		event.WithError(audit.ErrCodeValidationFailed, audit.KindValidation, err)
+		return model.UpdateResourceResponse{}, err
+	}
+
 	fgaRequest, err := toOpenFGAWriteRequest(req)
 	if err != nil {
 		event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
@@ -437,7 +452,7 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 				event.Append(audit.Level(audit.ErrLevelError))
 
 				return model.UpdateResourceResponse{}, &DetailedError{
-					Err:   ErrResounceAlreadyExistsOrNotFound,
+					Err:   ErrResourceAlreadyExistsOrNotFound,
 					Value: nil,
 				}
 			}

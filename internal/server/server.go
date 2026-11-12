@@ -56,6 +56,8 @@ type healthHandler interface {
 type resourcesEditor interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(c echo.Context) error
+	// CheckDecision проверяет решение.
+	CheckDecision(c echo.Context) error
 }
 
 type notesEditor interface {
@@ -67,6 +69,7 @@ type notesEditor interface {
 type middlewareHandler interface {
 	// CheckToken проверяет токен из запроса. Проверяет на expired, а также наличие user_id.
 	CheckToken(next echo.HandlerFunc) echo.HandlerFunc
+	CheckDecisionToken(next echo.HandlerFunc) echo.HandlerFunc
 }
 
 // Option - опция для настройки сервера.
@@ -207,7 +210,8 @@ func (s *Server) createRoutes() error {
 	// resources
 	resources := apiv0.Group("resources/", s.api.middleware.CheckToken)
 
-	resources.POST("update", s.api.h0.UpdateResource)
+	resources.POST("update", s.api.h0.UpdateResource) // обновление ресурса (после проверки)
+	e.POST("/v0/decisions/check", s.api.h0.CheckDecision, s.api.middleware.CheckDecisionToken, handlerV0.FillCtx)
 
 	s.e = e
 

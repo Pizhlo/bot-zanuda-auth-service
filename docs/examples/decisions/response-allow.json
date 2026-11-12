@@ -1,0 +1,24 @@
+{
+  "decision_id": "f088ee6b-80e5-4d83-ab39-f0fc69cc5f56",
+  "request_id": "5dd9cb63-5c64-4c27-b9f8-c9d9be3bb67e",
+  "result": "allow",
+  "allow": true,
+  "reasons": [
+    {
+      "code": "allowed_via_fga_relation",
+      "message": "Required relation is present"
+    },
+    {
+      "code": "allowed_fields",
+      "message": "Requested fields are allowed"
+    }
+  ],
+  "meta": {
+    "subject": "user:5b455ab4-1f63-40f6-83c8-302db5a61c73",
+    "action": "update",
+    "resource": "note:89a04b2d-6c4c-4d53-a8e5-f0786539d2a0",
+    "policy_version": "casbin:sha256:4dca4d3814684508d8d80691dbae41477f5f26771b822eb7f2cc980f9b0bafce",
+    "authorization_model_id": "01M78NFD09D1V5X8KYWX3AZDEG",
+    "latency_ms": 12
+  }
+}
