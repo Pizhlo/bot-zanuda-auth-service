@@ -9,7 +9,23 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// rejectedRequestID извлекает ID из тела для аудита отказа до обработки запроса.
+// decisionRequestHeaderID читает только транспортный ID. До аутентификации тело
+// decisions/check может быть ещё не доставлено.
+func decisionRequestHeaderID(header http.Header) uuid.UUID {
+	values := header.Values(echo.HeaderXRequestID)
+	if len(values) != 1 {
+		return uuid.Nil
+	}
+
+	id, err := uuid.Parse(values[0])
+	if err != nil {
+		return uuid.Nil
+	}
+
+	return id
+}
+
+// rejectedRequestID извлекает ID из тела для аудита прежних маршрутов синхронизации и фильтрации.
 // При отсутствии корректного ID вызывающий код назначает корреляцию на сервере.
 func rejectedRequestID(c echo.Context) uuid.UUID {
 	r := c.Request()

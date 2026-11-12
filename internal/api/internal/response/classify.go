@@ -22,6 +22,8 @@ func classify(err error) classification {
 	}
 
 	switch {
+	case errors.Is(err, fga.ErrSpacePrivacy):
+		return classification{StatusCode: http.StatusBadRequest, Code: audit.ErrCodeValidationFailed, Message: "invalid space privacy operation"}
 	case errors.Is(err, fga.ErrResourceAlreadyExistsOrNotFound):
 		return classification{StatusCode: http.StatusConflict, Code: audit.ErrCodeResourceAlreadyExistsOrNotFound, Message: err.Error()}
 	case errors.Is(err, fga.ErrNoTuplesToWriteOrDelete):

@@ -1,0 +1,599 @@
+{
+  "info": {
+    "name": "BZ-167 — ручная проверка решений",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Ручные запросы; необходимые пользователи и tuples должны быть подготовлены заранее. Инструкция: docs/postman/README.md. Коллекция не запускается агентом и не содержит настоящих секретов."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "client_id",
+      "value": "bot",
+      "type": "string"
+    },
+    {
+      "key": "client_secret",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "service_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "telegram_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subject_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "note_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reminder_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "shared_space_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "personal_space_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "target_user_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "space_owner_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "other_subject_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "other_telegram_user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{service_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Получить сервисный токен",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"grant_type\": \"client_credentials\",\n  \"client_id\": \"{{client_id}}\",\n  \"client_secret\": \"{{client_secret}}\",\n  \"scope\": \"bot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/auth/login",
+            "description": "200: вручную скопируйте access_token в переменную service_token. Этот логин не регистрирует Telegram-пользователя.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Проверки",
+      "item": [
+        {
+          "name": "01 — note:update разрешённые поля",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"update\",\n    \"attributes\": {\n      \"field_mask\": [\n        \"text\",\n        \"title\"\n      ]\n    }\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Для владельца или editor: 200, allow=true, allowed_via_fga_relation и allowed_fields. note_id — запись в shared_space_id."
+          }
+        },
+        {
+          "name": "02 — note:update запрещено техническое поле",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"update\",\n    \"attributes\": {\n      \"field_mask\": [\n        \"text\",\n        \"timestamp\"\n      ]\n    }\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "При наличии права update: 200, allow=false, forbidden_fields. Вся операция запрещена."
+          }
+        },
+        {
+          "name": "03 — reminder:update название и дата",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"update\",\n    \"attributes\": {\n      \"field_mask\": [\n        \"title\",\n        \"remind_at\"\n      ]\n    }\n  },\n  \"resource\": {\n    \"type\": \"reminder\",\n    \"id\": \"{{reminder_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "При наличии права update: 200, allow=true."
+          }
+        },
+        {
+          "name": "04 — reminder:stop",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"stop\"\n  },\n  \"resource\": {\n    \"type\": \"reminder\",\n    \"id\": \"{{reminder_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "При наличии права stop: 200, allow=true. Проверка не останавливает напоминание."
+          }
+        },
+        {
+          "name": "05 — personal:delete запрещён владельцу",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"delete\"\n  },\n  \"resource\": {\n    \"type\": \"space\",\n    \"id\": \"{{personal_space_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Для владельца personal: 200, allow=false, denied_by_fga_relation."
+          }
+        },
+        {
+          "name": "06 — member:edit владелец защищён",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"edit\",\n    \"attributes\": {\n      \"role\": \"viewer\"\n    }\n  },\n  \"resource\": {\n    \"type\": \"member\",\n    \"id\": \"{{space_owner_id}}\",\n    \"attributes\": {\n      \"space_id\": \"{{shared_space_id}}\"\n    }\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Caller — owner/admin shared: 200, deny, protected_space_owner."
+          }
+        },
+        {
+          "name": "07 — member:edit назначение owner недопустимо",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"edit\",\n    \"attributes\": {\n      \"role\": \"owner\"\n    }\n  },\n  \"resource\": {\n    \"type\": \"member\",\n    \"id\": \"{{target_user_id}}\",\n    \"attributes\": {\n      \"space_id\": \"{{shared_space_id}}\"\n    }\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Заполни target_user_id корректным UUID: он подставляется в resource.id. Пустое значение даёт 400: resource.id must be a nonzero UUID. С корректным UUID ожидается 400: action.attributes.role must be viewer, editor or admin for member add/edit. Запрос намеренно проверяет запрет назначения owner."
+          }
+        },
+        {
+          "name": "08 — reasons выключены",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"read\"\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": false,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Для пользователя с правом чтения: 200 allow, reasons=[]."
+          }
+        },
+        {
+          "name": "09 — пустая маска",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"update\",\n    \"attributes\": {\n      \"field_mask\": []\n    }\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "400 invalid_request."
+          }
+        },
+        {
+          "name": "10 — подмена subject",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{other_subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"read\"\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "Заголовок оставьте своего пользователя, other_subject_id — другой ненулевой UUID: 403 subject_mismatch."
+          }
+        },
+        {
+          "name": "11 — неверная диагностическая копия Telegram ID",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\",\n    \"attributes\": {\n      \"telegram_user_id\": \"{{other_telegram_user_id}}\"\n    }\n  },\n  \"action\": {\n    \"name\": \"read\"\n  },\n  \"resource\": {\n    \"type\": \"note\",\n    \"id\": \"{{note_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "other_telegram_user_id — корректное положительное число, отличающееся от заголовка: 400 invalid_request."
+          }
+        },
+        {
+          "name": "12 — отсутствует Telegram-заголовок",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"delete\"\n  },\n  \"resource\": {\n    \"type\": \"space\",\n    \"id\": \"{{personal_space_id}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "При действующем сервисном токене: HTTP 400, error_code=invalid_request, message=\"X-Telegram-User-Id header is required\". Тело корректно; поиск пользователя, FGA и аудит решения не выполняются."
+          }
+        },
+        {
+          "name": "13 — space:create shared",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"create\"\n  },\n  \"resource\": {\n    \"type\": \"space\",\n    \"id\": \"{{$guid}}\",\n    \"attributes\": {\n      \"space_type\": \"shared\"\n    }\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "HTTP 200, allow=true, allowed_for_registered_user."
+          }
+        },
+        {
+          "name": "14 — space:create personal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"create\"\n  },\n  \"resource\": {\n    \"type\": \"space\",\n    \"id\": \"{{$guid}}\",\n    \"attributes\": {\n      \"space_type\": \"personal\"\n    }\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "HTTP 200. До создания первого личного пространства — allow=true, first_personal_space. После синхронизации первого — allow=false, personal_space_already_exists."
+          }
+        },
+        {
+          "name": "15 — space:create без типа",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-User-Id",
+                "value": "{{telegram_user_id}}"
+              },
+              {
+                "key": "X-Request-ID",
+                "value": "{{decision_request_id}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_id\": \"{{decision_request_id}}\",\n  \"subject\": {\n    \"type\": \"user\",\n    \"id\": \"{{subject_id}}\"\n  },\n  \"action\": {\n    \"name\": \"create\"\n  },\n  \"resource\": {\n    \"type\": \"space\",\n    \"id\": \"{{$guid}}\"\n  },\n  \"options\": {\n    \"include_reasons\": true,\n    \"consistency\": \"higher_consistency\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{base_url}}/api/v0/decisions/check",
+            "description": "HTTP 400, invalid_request с указанием resource.attributes.space_type."
+          }
+        }
+      ],
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.variables.set('decision_request_id', pm.variables.replaceIn('{{$guid}}'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

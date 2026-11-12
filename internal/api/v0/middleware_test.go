@@ -23,6 +23,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
 
@@ -342,6 +343,8 @@ func TestVerifiedClient(t *testing.T) {
 		{"empty subject", jwt.MapClaims{"sub": "", "scope": "bot"}, noLookup, model.BotScope, errInvalidClientID, ""},
 		{"numeric subject", jwt.MapClaims{"sub": 123, "scope": "bot"}, noLookup, model.BotScope, errInvalidClientID, ""},
 		{"invalid scope type", jwt.MapClaims{"sub": "client", "scope": []string{"bot"}}, noLookup, model.BotScope, errInvalidTokenScope, ""},
+		{"issued empty scope", jwt.MapClaims{"sub": "client", "scope": ""}, lookup(model.ServiceClient{IsActive: true}, nil), model.BotScope, errMissingScope, ""},
+		{"tab separated scopes", jwt.MapClaims{"sub": "client", "scope": "bot\tread"}, noLookup, model.BotScope, errInvalidTokenScope, ""},
 		{"empty scope list", jwt.MapClaims{"sub": "client", "scope": "  "}, noLookup, model.BotScope, errInvalidTokenScope, ""},
 		{"admin only", jwt.MapClaims{"sub": "client", "scope": "admin"}, lookup(model.ServiceClient{IsActive: true, Scopes: []string{"bot", "admin"}}, nil), model.BotScope, errMissingScope, ""},
 		{"inactive", jwt.MapClaims{"sub": "client", "scope": "bot"}, lookup(model.ServiceClient{}, nil), model.BotScope, errInactiveClient, ""},
@@ -488,12 +491,98 @@ func TestServiceClientID(t *testing.T) {
 	require.Equal(t, "admin", serviceClientID(ctx))
 }
 
+// Проверяет запись в глобальный logger последовательно.
+//
+//nolint:paralleltest // Тест временно меняет вывод глобального логгера.
+func TestCheckToken_ExpiredTokenCorrelation(t *testing.T) {
+	output := captureTokenWarnings(t)
+
+	headerID := uuid.NewString()
+	bodyID := uuid.NewString()
+
+	for _, tc := range []struct {
+		name, header string
+		wantID       func(*testing.T, string, map[string]string)
+	}{
+		{"valid header", headerID, func(t *testing.T, id string, body map[string]string) {
+			t.Helper()
+			require.Equal(t, headerID, id)
+			require.Equal(t, id, body["request_id"])
+		}},
+		{"no header", "", wantGeneratedCorrelation},
+		{"invalid header", "invalid", wantGeneratedCorrelation},
+		{"zero UUID", uuid.Nil.String(), wantGeneratedCorrelation},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output.Reset()
+
+			var auditLog bytes.Buffer
+
+			auth := mocks.NewMockAuthService(gomock.NewController(t))
+			auth.EXPECT().CheckToken(gomock.Any(), "Bearer expired").Return(nil, errors.New("expired"))
+			h, err := NewMiddlewareHandler(WithRequestAuditor(audit.NewAuditor(audit.WithOutput(&auditLog), audit.WithHook(ConnectionHook))), WithMiddlewareAuthService(auth))
+			require.NoError(t, err)
+
+			payload := strings.NewReader(`{"request_id":"` + bodyID + `"}`)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v0/decisions/check", payload)
+			r.Header.Set("Authorization", "Bearer expired")
+
+			if tc.header != "" {
+				r.Header.Set(echo.HeaderXRequestID, tc.header)
+			}
+
+			rec := httptest.NewRecorder()
+			require.NoError(t, h.AuditDecision(h.CheckToken(DecisionToken)(nil))(echo.New().NewContext(r, rec)))
+
+			require.Equal(t, http.StatusUnauthorized, rec.Code)
+			require.EqualValues(t, payload.Size(), payload.Len())
+
+			id := rec.Header().Get(echo.HeaderXRequestID)
+			require.NotEqual(t, bodyID, id)
+
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, "unauthorized", body["error_code"])
+			tc.wantID(t, id, body)
+
+			require.Contains(t, output.String(), id)
+			require.Contains(t, output.String(), "unauthorized")
+			require.Equal(t, 2, strings.Count(auditLog.String(), "request_id="+id))
+			require.Equal(t, 1, strings.Count(auditLog.String(), "status=failed"))
+			require.Contains(t, auditLog.String(), "stage:authenticate")
+		})
+	}
+}
+
+func captureTokenWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var output bytes.Buffer
+
+	logger := logrus.StandardLogger()
+	old := logger.Out
+	logger.SetOutput(&output)
+	t.Cleanup(func() { logger.SetOutput(old) })
+
+	return &output
+}
+
+func wantGeneratedCorrelation(t *testing.T, id string, body map[string]string) {
+	t.Helper()
+
+	parsed, err := uuid.Parse(id)
+	require.NoError(t, err)
+
+	require.NotEqual(t, uuid.Nil, parsed)
+	require.NotContains(t, body, "request_id")
+}
+
 func TestCheckToken(t *testing.T) {
 	t.Parallel()
 
 	noAuth := func(*mocks.MockAuthService) {}
 	noUserCheck := func(*testing.T, context.Context) {}
-	resource, notes := (*MiddlewareHandler).AuditResourceUpdate, (*MiddlewareHandler).AuditNotesFilter
+	resource, notes, decisionRoute := (*MiddlewareHandler).AuditResourceUpdate, (*MiddlewareHandler).AuditNotesFilter, (*MiddlewareHandler).AuditDecision
 	denyToken := func(header string) func(*mocks.MockAuthService) {
 		return func(a *mocks.MockAuthService) {
 			a.EXPECT().CheckToken(gomock.Any(), header).Return(nil, errors.New("private token error"))
@@ -501,21 +590,22 @@ func TestCheckToken(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-
-		expect func(*mocks.MockAuthService)
-		run    func(*testing.T, echo.MiddlewareFunc)
+		name     string
+		contract TokenContract
+		expect   func(*mocks.MockAuthService)
+		run      func(*testing.T, echo.MiddlewareFunc)
 	}{
-		{"resource requires audit before authentication", noAuth, checkTokenResponse(withoutRequestAudit, "42", http.StatusInternalServerError, noUserCheck)},
-
-		{"token rejected", denyToken("Bearer sample"), checkTokenResponse(resource, "42", http.StatusUnauthorized, noUserCheck)},
-		{"resource rejects token without bot", expectGrantedScope("read"), checkTokenResponse(resource, "42", http.StatusUnauthorized, noUserCheck)},
-		{"resource checks Telegram header", expectGrantedScope("bot"), checkTokenResponse(resource, "", http.StatusUnauthorized, noUserCheck)},
-		{"resource accepts granted scopes including bot", expectGrantedScope("bot read"), checkTokenResponse(resource, "42", http.StatusNoContent, wantTelegramUser)},
-
-		{"denied resource records interrupted response", denyToken("Bearer private"), checkRejectedRequestAudit("/api/v0/resources/update", fga.OperationUpdateResource, resource)},
-		{"denied notes record interrupted response", denyToken("Bearer private"), checkRejectedRequestAudit("/api/v0/auth/notes/filter", audit.OperationFilterNotes, notes)},
-		{"failed user check records verified service client", authClient, checkVerifiedCallerAudit},
+		{"resource requires audit before authentication", ResourceToken, noAuth, checkTokenResponse(withoutRequestAudit, "42", http.StatusInternalServerError, noUserCheck)},
+		{"decision requires audit before authentication", DecisionToken, noAuth, checkTokenResponse(withoutRequestAudit, "42", http.StatusInternalServerError, noUserCheck)},
+		{"token rejected", ResourceToken, denyToken("Bearer sample"), checkTokenResponse(resource, "42", http.StatusUnauthorized, noUserCheck)},
+		{"resource rejects token without bot", ResourceToken, expectGrantedScope("read"), checkTokenResponse(resource, "42", http.StatusUnauthorized, noUserCheck)},
+		{"resource checks Telegram header", ResourceToken, expectGrantedScope("bot"), checkTokenResponse(resource, "", http.StatusUnauthorized, noUserCheck)},
+		{"resource accepts granted scopes including bot", ResourceToken, expectGrantedScope("bot read"), checkTokenResponse(resource, "42", http.StatusNoContent, wantTelegramUser)},
+		{"decision delegates Telegram verification to service", DecisionToken, expectGrantedScope("read bot"), checkTokenResponse(decisionRoute, "", http.StatusNoContent, noUserCheck)},
+		{"decision requires bot scope", DecisionToken, expectGrantedScope("admin"), checkTokenResponse(decisionRoute, "42", http.StatusForbidden, noUserCheck)},
+		{"denied resource records interrupted response", ResourceToken, denyToken("Bearer private"), checkRejectedRequestAudit("/api/v0/resources/update", fga.OperationUpdateResource, resource)},
+		{"denied notes record interrupted response", ResourceToken, denyToken("Bearer private"), checkRejectedRequestAudit("/api/v0/auth/notes/filter", audit.OperationFilterNotes, notes)},
+		{"failed user check records verified service client", ResourceToken, authClient, checkVerifiedCallerAudit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -524,7 +614,7 @@ func TestCheckToken(t *testing.T) {
 			tc.expect(auth)
 			h := MiddlewareHandler{authService: auth}
 
-			var check echo.MiddlewareFunc = h.CheckToken
+			check := h.CheckToken(tc.contract)
 
 			tc.run(t, check)
 		})
@@ -568,6 +658,131 @@ func expectGrantedScope(scope string) func(*mocks.MockAuthService) {
 	}
 }
 
+func TestRejectInvalidToken(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		contract    TokenContract
+		cause       error
+		field, want string
+	}{
+		{"resource token", ResourceToken, errors.New("expired token"), "error", "expired token"},
+		{"resource claims", ResourceToken, errNoTokenPayload, "error", errNoTokenPayload.Error()},
+		{"decision claims", DecisionToken, errNoTokenPayload, "error_code", "unauthorized"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+
+			require.NoError(t, rejectInvalidToken(c, tc.contract, tc.cause))
+			require.Equal(t, http.StatusUnauthorized, rec.Code)
+
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, tc.want, body[tc.field])
+		})
+	}
+}
+
+func TestRejectServiceClient(t *testing.T) {
+	t.Parallel()
+
+	headerID := uuid.NewString()
+
+	for _, tc := range []struct {
+		name        string
+		contract    TokenContract
+		cause       error
+		status      int
+		field, want string
+		wantHeader  string
+	}{
+		{"resource unknown client", ResourceToken, storage.ErrNotFound, 401, "error", "invalid client", ""},
+		{"resource inactive client", ResourceToken, errInactiveClient, 401, "error", errInactiveClient.Error(), ""},
+		{"resource denied scope", ResourceToken, errMissingScope, 401, "error", errMissingScope.Error(), ""},
+		{"resource unavailable storage", ResourceToken, context.DeadlineExceeded, 500, "error", "internal server error", ""},
+		{"decision invalid client claim", DecisionToken, errInvalidClientID, 401, "error_code", "unauthorized", headerID},
+		{"decision forbidden", DecisionToken, errMissingScope, 403, "error_code", "forbidden", headerID},
+		{"decision unavailable storage", DecisionToken, context.DeadlineExceeded, 503, "error_code", "identity_store_unavailable", headerID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := httptest.NewRecorder()
+			payload := strings.NewReader(`{"request_id":"` + uuid.NewString() + `"}`)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", payload)
+			req.Header.Set(echo.HeaderXRequestID, headerID)
+			c := echo.New().NewContext(req, rec)
+
+			require.NoError(t, rejectServiceClient(c, tc.contract, tc.cause))
+			require.Equal(t, tc.status, rec.Code)
+
+			var body map[string]string
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			require.Equal(t, tc.want, body[tc.field])
+			require.Equal(t, tc.wantHeader, rec.Header().Get(echo.HeaderXRequestID))
+			require.Equal(t, tc.wantHeader, body["request_id"])
+			require.EqualValues(t, payload.Size(), payload.Len())
+		})
+	}
+}
+
+func TestServeAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	wantNoTelegram := func(t *testing.T, ctx context.Context) {
+		t.Helper()
+
+		_, ok := userIDFromContext(ctx)
+		require.False(t, ok)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		contract   TokenContract
+		header     string
+		wantUser   func(*testing.T, context.Context)
+		wantCalled bool
+		wantErr    error
+		wantStatus int
+	}{
+		{"resource sets Telegram identity", ResourceToken, "42", wantTelegramUser, true, io.ErrClosedPipe, http.StatusOK},
+		{"resource rejects zero", ResourceToken, "0", func(*testing.T, context.Context) {}, false, nil, http.StatusBadRequest},
+		{"resource rejects signed ID", ResourceToken, "-1", func(*testing.T, context.Context) {}, false, nil, http.StatusBadRequest},
+		{"resource requires Telegram identity", ResourceToken, "", func(*testing.T, context.Context) {}, false, nil, http.StatusUnauthorized},
+		{"decision passes a missing header to the service", DecisionToken, "", wantNoTelegram, true, io.ErrClosedPipe, http.StatusOK},
+		{"decision defers a present header to the service", DecisionToken, "42", wantNoTelegram, true, io.ErrClosedPipe, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.Header.Set(userIDHeader, tc.header)
+
+			rec := httptest.NewRecorder()
+			c := echo.New().NewContext(req, rec)
+			called := false
+
+			err := serveAuthenticated(c, tc.contract, "verified-client", func(c echo.Context) error {
+				called = true
+				ctx := c.Request().Context()
+				require.Equal(t, "verified-client", serviceClientID(ctx))
+				tc.wantUser(t, ctx)
+
+				return io.ErrClosedPipe
+			})
+			require.ErrorIs(t, err, tc.wantErr)
+
+			require.Equal(t, tc.wantCalled, called)
+			require.Equal(t, tc.wantStatus, rec.Code)
+		})
+	}
+}
+
 func wantTelegramUser(t *testing.T, ctx context.Context) {
 	t.Helper()
 
@@ -583,4 +798,105 @@ func withoutRequestAudit(_ *MiddlewareHandler, next echo.HandlerFunc) echo.Handl
 func testAuditMiddleware(t *testing.T) *MiddlewareHandler {
 	t.Helper()
 	return &MiddlewareHandler{requestAuditor: testaudit.NewAuditor(t)}
+}
+
+func TestBeginAuthentication(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		contract TokenContract
+		open     func(*MiddlewareHandler, echo.HandlerFunc) echo.HandlerFunc
+		want     error
+	}{
+		{"missing resource", ResourceToken, func(_ *MiddlewareHandler, next echo.HandlerFunc) echo.HandlerFunc { return next }, audit.ErrMissingAttempt},
+		{"missing decision", DecisionToken, func(_ *MiddlewareHandler, next echo.HandlerFunc) echo.HandlerFunc { return next }, audit.ErrMissingAttempt},
+		{"notes", ResourceToken, (*MiddlewareHandler).AuditNotesFilter, nil},
+		{"decision", DecisionToken, (*MiddlewareHandler).AuditDecision, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := echo.New().NewContext(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil), httptest.NewRecorder())
+			err := tc.open(testAuditMiddleware(t), func(c echo.Context) error {
+				return beginAuthentication(c.Request().Context(), tc.contract)
+			})(c)
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
+func TestRecordResponseWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	withAudit := func(t *testing.T, check func(context.Context)) string {
+		t.Helper()
+
+		var output bytes.Buffer
+
+		ctx, attempt, err := audit.Begin(t.Context(), audit.NewAuditor(audit.WithOutput(&output)), audit.OperationFilterNotes, audit.StageAuthenticate.String())
+		require.NoError(t, err)
+
+		check(ctx)
+		attempt.Finish(ctx, &err)
+
+		return output.String()
+	}
+	withoutAudit := func(t *testing.T, check func(context.Context)) string {
+		t.Helper()
+		check(t.Context())
+
+		return ""
+	}
+	absent := func(t *testing.T, log string) {
+		t.Helper()
+		require.NotContains(t, log, audit.KeyResponseWriteFailed)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		err       error
+		committed bool
+		run       func(*testing.T, func(context.Context)) string
+		want      func(*testing.T, string)
+	}{
+		{"response written", nil, true, withAudit, absent},
+		{"before headers", io.ErrClosedPipe, false, withAudit, absent},
+		{"write interrupted", io.ErrClosedPipe, true, withAudit, func(t *testing.T, log string) {
+			t.Helper()
+			require.Contains(t, log, audit.KeyResponseWriteFailed)
+		}},
+		{"decision uses its own event", io.ErrClosedPipe, true, withoutAudit, func(t *testing.T, log string) {
+			t.Helper()
+			require.Empty(t, log)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			log := tc.run(t, func(ctx context.Context) {
+				recordResponseWriteFailure(audit.FromContext(ctx), &echo.Response{Committed: tc.committed}, &tc.err)
+			})
+
+			tc.want(t, log)
+		})
+	}
+}
+
+func TestValidScopeList(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name, scope string
+		valid       bool
+	}{
+		{"no grants", "", true}, {"single permission", "bot", true},
+		{"multiple permissions", " bot  admin ", true}, {"spaces only", " ", false},
+		{"tab", "bot\tadmin", false}, {"line break", "bot\nadmin", false},
+		{"non-breaking space", "bot\u00a0admin", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.valid, validScopeList(tc.scope))
+		})
+	}
 }

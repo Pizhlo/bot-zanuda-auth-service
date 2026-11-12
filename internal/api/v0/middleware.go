@@ -2,6 +2,7 @@ package v0
 
 import (
 	"auth-service/internal/model"
+	"auth-service/internal/service/decision"
 	"auth-service/internal/service/fga"
 	"auth-service/internal/storage"
 	"auth-service/pkg/audit"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 
@@ -108,51 +110,102 @@ func (s *MiddlewareHandler) auditRequest(operation string, next echo.HandlerFunc
 	}
 }
 
+// TokenContract указывает CheckToken, как продолжить обработку конкретного маршрута.
+// У notes/filter и resources/update middleware проверяет Telegram-заголовок и сохраняет
+// прежний формат ошибок. У decisions/check сервис сверяет заголовок с subject.id,
+// а middleware оформляет отказ с error_code и request_id. JWT и scope bot проверяются одинаково.
+type TokenContract uint8
+
+const (
+	// ResourceToken требует Telegram-заголовок до синхронизации или фильтрации.
+	ResourceToken TokenContract = iota + 1
+	// DecisionToken передаёт проверку Telegram ID сервису решений для сверки с subject.
+	DecisionToken
+)
+
 // CheckToken проверяет подпись и срок JWT, затем находит активного клиента и сверяет его scope.
-// Для операций бота проверяет scope bot и Telegram ID в заголовке.
-func (s *MiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) (err error) {
-		ctx := c.Request().Context()
+// Все пользовательские маршруты требуют bot в списке scope токена. Контракт маршрута
+// определяет формат отказа и место проверки Telegram ID.
+func (s *MiddlewareHandler) CheckToken(contract TokenContract) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) (err error) {
+			ctx := c.Request().Context()
+			if startErr := beginAuthentication(ctx, contract); startErr != nil {
+				if contract == DecisionToken {
+					return decisionError(ctx, c, startErr, decisionRequestHeaderID(c.Request().Header))
+				}
 
-		a := audit.FromContext(ctx)
-		if a == nil {
-			return errResponse(c, http.StatusInternalServerError, audit.ErrMissingAttempt)
-		}
-
-		a.At(audit.StageAuthenticate.String())
-
-		defer func() {
-			if err != nil && c.Response().Committed {
-				a.Context(audit.EventContext{audit.KeyResponseWriteFailed: true})
+				return errResponse(c, http.StatusInternalServerError, startErr)
 			}
-		}()
 
-		claims, err := s.verifiedPayload(ctx, c.Request().Header.Get("Authorization"))
-		if err != nil {
-			return rejectInvalidToken(c, err)
+			defer recordResponseWriteFailure(audit.FromContext(ctx), c.Response(), &err)
+
+			claims, err := s.verifiedPayload(ctx, c.Request().Header.Get("Authorization"))
+			if err != nil {
+				return rejectInvalidToken(c, contract, err)
+			}
+
+			clientID, err := s.verifiedClient(ctx, claims, model.BotScope)
+			if err != nil {
+				return rejectServiceClient(c, contract, err)
+			}
+
+			return serveAuthenticated(c, contract, clientID, next)
 		}
-
-		clientID, err := s.verifiedClient(ctx, claims, model.BotScope)
-		if err != nil {
-			return rejectServiceClient(c, err)
-		}
-
-		return serveAuthenticated(c, clientID, next)
 	}
 }
 
-// serveAuthenticated передаёт обработчику проверенный ID сервисного клиента.
-// Обязательный заголовок Telegram ID проверяется до вызова обработчика.
-func serveAuthenticated(c echo.Context, clientID string, next echo.HandlerFunc) error {
-	ctx := context.WithValue(c.Request().Context(), clientIDKey{}, clientID)
-	audit.FromContext(ctx).Context(audit.EventContext{audit.KeyCaller: clientID})
+// recordResponseWriteFailure дополняет аудит notes/filter и resources/update, если
+// запись начатого ответа вернула ошибку. У решения свой обработчик записи ответа.
+func recordResponseWriteFailure(attempt *audit.Attempt, response *echo.Response, result *error) {
+	if attempt != nil && response.Committed && *result != nil {
+		attempt.Context(audit.EventContext{audit.KeyResponseWriteFailed: true})
+	}
+}
 
-	userID := c.Request().Header.Get(userIDHeader)
-	if userID == "" {
-		return tokenRejection(c, http.StatusUnauthorized, fmt.Errorf("invalid request: header '%s' not found", userIDHeader), audit.ErrCodeValidationFailed, "Telegram user header is missing")
+// beginAuthentication требует событие выбранной операции до чтения JWT и обращения к реестру клиентов.
+func beginAuthentication(ctx context.Context, contract TokenContract) error {
+	if contract == DecisionToken {
+		if err := decision.RequireAudit(ctx); err != nil {
+			return err
+		}
+
+		decision.AuditAuthenticationStarted(ctx)
+
+		return nil
 	}
 
-	ctx = withUserID(ctx, userID)
+	a := audit.FromContext(ctx)
+	if a == nil {
+		return audit.ErrMissingAttempt
+	}
+
+	a.At(audit.StageAuthenticate.String())
+
+	return nil
+}
+
+// serveAuthenticated передаёт обработчику проверенный ID сервисного клиента.
+// У decisions/check сервис сверяет Telegram ID с subject из тела. Для синхронизации
+// и фильтрации обязательный заголовок проверяется здесь, до вызова обработчика.
+func serveAuthenticated(c echo.Context, contract TokenContract, clientID string, next echo.HandlerFunc) error {
+	ctx := context.WithValue(c.Request().Context(), clientIDKey{}, clientID)
+	if contract == DecisionToken {
+		decision.AuditAuthenticated(ctx, clientID)
+	} else {
+		audit.FromContext(ctx).Context(audit.EventContext{audit.KeyCaller: clientID})
+
+		userID := c.Request().Header.Get(userIDHeader)
+		if userID == "" {
+			return tokenRejection(c, http.StatusUnauthorized, fmt.Errorf("invalid request: header '%s' not found", userIDHeader), audit.ErrCodeValidationFailed, "Telegram user header is missing")
+		}
+
+		if !model.ValidTelegramID(userID) {
+			return tokenRejection(c, http.StatusBadRequest, errors.New("invalid Telegram user ID"), audit.ErrCodeValidationFailed, "Telegram user ID must be a positive decimal int64")
+		}
+
+		ctx = withUserID(ctx, userID)
+	}
 
 	c.SetRequest(c.Request().WithContext(ctx))
 
@@ -167,7 +220,11 @@ func serviceClientID(ctx context.Context) string {
 	return id
 }
 
-func rejectInvalidToken(c echo.Context, err error) error {
+func rejectInvalidToken(c echo.Context, contract TokenContract, err error) error {
+	if contract == DecisionToken {
+		return decisionError(c.Request().Context(), c, fmt.Errorf("%w: %w", decision.ErrUnauthorized, err), decisionRequestHeaderID(c.Request().Header))
+	}
+
 	if errors.Is(err, errNoTokenPayload) {
 		logrus.Error(errNoTokenPayload)
 		return tokenRejection(c, http.StatusUnauthorized, err, audit.ErrCodeTokenInvalid, "Token has no payload")
@@ -178,7 +235,11 @@ func rejectInvalidToken(c echo.Context, err error) error {
 	return tokenRejection(c, http.StatusUnauthorized, err, audit.ErrCodeTokenInvalid, audit.MessageTokenVerificationFailed)
 }
 
-func rejectServiceClient(c echo.Context, err error) error {
+func rejectServiceClient(c echo.Context, contract TokenContract, err error) error {
+	if contract == DecisionToken {
+		return decisionError(c.Request().Context(), c, decisionClientError(err), decisionRequestHeaderID(c.Request().Header))
+	}
+
 	status := http.StatusUnauthorized
 
 	switch {
@@ -324,10 +385,8 @@ func (s *MiddlewareHandler) verifiedClient(ctx context.Context, payload jwt.MapC
 		return "", errInvalidClientID
 	}
 
-	scope, _ := payload["scope"].(string)
-
-	scopes := strings.Fields(scope)
-	if len(scopes) == 0 {
+	scope, ok := payload["scope"].(string)
+	if !ok || !validScopeList(scope) {
 		return "", errInvalidTokenScope
 	}
 
@@ -340,6 +399,7 @@ func (s *MiddlewareHandler) verifiedClient(ctx context.Context, payload jwt.MapC
 		return "", errInactiveClient
 	}
 
+	scopes := strings.Fields(scope)
 	if !slices.Contains(scopes, string(required)) {
 		return "", errMissingScope
 	}
@@ -351,6 +411,18 @@ func (s *MiddlewareHandler) verifiedClient(ctx context.Context, payload jwt.MapC
 	}
 
 	return clientID, nil
+}
+
+// validScopeList отличает выданный login пустой список прав от повреждённого
+// claim. Имена разрешений в непустом списке разделяет обычный пробел.
+func validScopeList(scope string) bool {
+	if scope == "" {
+		return true
+	}
+
+	return strings.TrimSpace(scope) != "" && !strings.ContainsFunc(scope, func(ch rune) bool {
+		return ch != ' ' && unicode.IsSpace(ch)
+	})
 }
 
 type userIDKey struct{}

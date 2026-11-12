@@ -5,6 +5,7 @@
 package mocks
 
 import (
+	v0 "auth-service/internal/api/v0"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -32,6 +33,20 @@ func NewMockhandler(ctrl *gomock.Controller) *Mockhandler {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *Mockhandler) EXPECT() *MockhandlerMockRecorder {
 	return m.recorder
+}
+
+// CheckDecision mocks base method.
+func (m *Mockhandler) CheckDecision(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecision", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckDecision indicates an expected call of CheckDecision.
+func (mr *MockhandlerMockRecorder) CheckDecision(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*Mockhandler)(nil).CheckDecision), c)
 }
 
 // FilterNotes mocks base method.
@@ -238,6 +253,20 @@ func (m *MockresourcesEditor) EXPECT() *MockresourcesEditorMockRecorder {
 	return m.recorder
 }
 
+// CheckDecision mocks base method.
+func (m *MockresourcesEditor) CheckDecision(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecision", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckDecision indicates an expected call of CheckDecision.
+func (mr *MockresourcesEditorMockRecorder) CheckDecision(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*MockresourcesEditor)(nil).CheckDecision), c)
+}
+
 // UpdateResource mocks base method.
 func (m *MockresourcesEditor) UpdateResource(c echo.Context) error {
 	m.ctrl.T.Helper()
@@ -312,6 +341,20 @@ func (m *MockmiddlewareHandler) EXPECT() *MockmiddlewareHandlerMockRecorder {
 	return m.recorder
 }
 
+// AuditDecision mocks base method.
+func (m *MockmiddlewareHandler) AuditDecision(next echo.HandlerFunc) echo.HandlerFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AuditDecision", next)
+	ret0, _ := ret[0].(echo.HandlerFunc)
+	return ret0
+}
+
+// AuditDecision indicates an expected call of AuditDecision.
+func (mr *MockmiddlewareHandlerMockRecorder) AuditDecision(next interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AuditDecision", reflect.TypeOf((*MockmiddlewareHandler)(nil).AuditDecision), next)
+}
+
 // AuditNotesFilter mocks base method.
 func (m *MockmiddlewareHandler) AuditNotesFilter(next echo.HandlerFunc) echo.HandlerFunc {
 	m.ctrl.T.Helper()
@@ -341,15 +384,15 @@ func (mr *MockmiddlewareHandlerMockRecorder) AuditResourceUpdate(next interface{
 }
 
 // CheckToken mocks base method.
-func (m *MockmiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
+func (m *MockmiddlewareHandler) CheckToken(contract v0.TokenContract) echo.MiddlewareFunc {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckToken", next)
-	ret0, _ := ret[0].(echo.HandlerFunc)
+	ret := m.ctrl.Call(m, "CheckToken", contract)
+	ret0, _ := ret[0].(echo.MiddlewareFunc)
 	return ret0
 }
 
 // CheckToken indicates an expected call of CheckToken.
-func (mr *MockmiddlewareHandlerMockRecorder) CheckToken(next interface{}) *gomock.Call {
+func (mr *MockmiddlewareHandlerMockRecorder) CheckToken(contract interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockmiddlewareHandler)(nil).CheckToken), next)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckToken", reflect.TypeOf((*MockmiddlewareHandler)(nil).CheckToken), contract)
 }

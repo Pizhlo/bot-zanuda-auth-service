@@ -17,7 +17,7 @@ import (
 // @version         1.0
 // @description     API для работы с авторизацией
 // @host            localhost:8080
-// @basePath        /api/v0
+// @basePath        /
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
@@ -67,8 +67,8 @@ func main() {
 
 	defer butler.stop(notifyCtx, vaultClient)
 
-	repo := initPostgresStorage(notifyCtx, config.Postgres)
-	if err := repo.Run(notifyCtx); err != nil {
+	repo, err := initPostgresStorage(notifyCtx, config.Postgres)
+	if err != nil {
 		logrus.WithFields(logrus.Fields{
 			"db_name": config.Postgres.DBName,
 		}).WithError(err).Fatal("unable to connect postgres")
@@ -95,11 +95,10 @@ func main() {
 
 	auditor := initAuditor(config.Audit, sender)
 
-	fga := initFGAClient(config.OpenFGA, repo)
-	if err := fga.Connect(notifyCtx); err != nil {
-		logrus.WithError(err).Fatal("failed to connect to fga")
+	fga, decisions, err := initAuthorization(notifyCtx, config, repo)
+	if err != nil {
+		logrus.WithError(err).Fatal("failed to initialize authorization")
 	}
-
 	defer butler.stop(notifyCtx, fga)
 
 	authSvc := initAuthService(vaultClient, config.Auth, repo)
@@ -114,7 +113,7 @@ func main() {
 
 	userSvc := initUserService(repo, redis, config.Auth)
 
-	resourcesHandler := initResourcesHandler(fga)
+	resourcesHandler := initResourcesHandler(fga, decisions)
 	authHandler := initAuthHandler(authSvc)
 	notesHandler := initNotesHandler(politicsSvc, userSvc)
 	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler, resourcesHandler)

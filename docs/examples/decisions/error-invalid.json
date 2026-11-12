@@ -1,0 +1,5 @@
+{
+  "error_code": "invalid_request",
+  "message": "X-Telegram-User-Id header is required",
+  "request_id": "5dd9cb63-5c64-4c27-b9f8-c9d9be3bb67e"
+}

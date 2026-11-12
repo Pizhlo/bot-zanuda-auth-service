@@ -1,11 +1,12 @@
 package v0
 
 import (
-	"auth-service/internal/api/v0/mocks"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"auth-service/internal/api/v0/mocks"
 
 	"github.com/golang/mock/gomock"
 	"github.com/labstack/echo/v4"
@@ -280,4 +281,15 @@ func runTestServer(t *testing.T, h *Handler) *echo.Echo {
 	apiv0.GET("health", h.Health)
 
 	return e
+}
+
+func TestHandlerCheckDecision(t *testing.T) {
+	t.Parallel()
+
+	c := echo.New().NewContext(httptest.NewRequestWithContext(t.Context(), "POST", "/", nil), httptest.NewRecorder())
+
+	resources := mocks.NewMockresourcesProcessorHandler(gomock.NewController(t))
+	resources.EXPECT().CheckDecision(c).Return(io.ErrClosedPipe)
+	h := Handler{resources: resources}
+	require.ErrorIs(t, h.CheckDecision(c), io.ErrClosedPipe)
 }

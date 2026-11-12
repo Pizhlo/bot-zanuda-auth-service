@@ -214,6 +214,7 @@ func TestCreateRoutes(t *testing.T) {
 	}
 
 	routes := []struct{ path, operation string }{
+		{"/api/v0/decisions/check", "check_decision"},
 		{"/api/v0/resources/update", "fga.update_resource"},
 		{"/api/v0/auth/notes/filter", "politics.filter_notes"},
 	}

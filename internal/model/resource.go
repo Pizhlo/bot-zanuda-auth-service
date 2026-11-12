@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -12,23 +13,49 @@ type ResourceType string
 
 const (
 	// ResourceTypeSpace - пространство.
-	ResourceTypeSpace = "space"
+	ResourceTypeSpace ResourceType = "space"
 	// ResourceTypeNote - заметка.
-	ResourceTypeNote = "note"
+	ResourceTypeNote ResourceType = "note"
 	// ResourceTypeReminder - напоминание.
-	ResourceTypeReminder = "reminder"
+	ResourceTypeReminder ResourceType = "reminder"
 	// ResourceTypeUser - пользователь.
-	ResourceTypeUser = "user"
+	ResourceTypeUser ResourceType = "user"
 )
 
-// Resource - ресурс.
+// Resource описывает идентичность участника или объекта в графе отношений.
+// Attributes передаются синхронизацией как данные и не входят в идентичность.
 type Resource struct {
-	ID   uuid.UUID    `json:"id"`
-	Type ResourceType `json:"type"`
+	ID         uuid.UUID      `json:"id"`
+	Type       ResourceType   `json:"type"`
+	Attributes map[string]any `json:"attributes"`
 }
 
 func (r Resource) IsEmpty() bool {
 	return r.ID == uuid.Nil || r.Type == ""
+}
+
+// Equal сравнивает тип и UUID ресурсов, игнорируя их атрибуты.
+// Пустые значения тоже сравнимы; валидность проверяется отдельно через IsEmpty.
+func (r Resource) Equal(other Resource) bool {
+	return r.Type == other.Type && r.ID == other.ID
+}
+
+// ParseResourceIdentity разбирает каноническую ссылку type:UUID из сохранённых tuples.
+// Не принимает wildcard, userset или нулевой UUID. Допустимость самого типа
+// проверяет вызывающий код; атрибуты в такой ссылке отсутствуют.
+func ParseResourceIdentity(value string) (Resource, error) {
+	kind, rawID, found := strings.Cut(value, ":")
+
+	id, err := uuid.Parse(rawID)
+	if err != nil {
+		return Resource{}, fmt.Errorf("parse resource UUID: %w", err)
+	}
+
+	if !found || kind == "" || id == uuid.Nil || rawID != id.String() {
+		return Resource{}, fmt.Errorf("invalid resource identity: %s", value)
+	}
+
+	return Resource{Type: ResourceType(kind), ID: id}, nil
 }
 
 // ParentRelationName возвращает имя relation для связи ресурса с родителем в auth-модели OpenFGA.
@@ -157,9 +184,41 @@ type Tuple struct {
 	Resource string `json:"resource"`
 }
 
+type RelationType string
+
+const (
+	RelationTypeOwner  RelationType = "owner"
+	RelationTypeViewer RelationType = "viewer"
+	RelationTypeEditor RelationType = "editor"
+	RelationTypeAdmin  RelationType = "admin"
+)
+
+// ActionType - типы действий пользователя над ресурсом (согласно auth-модели OpenFGA).
+type ActionType string
+
+const (
+	// Типы действий над пространством.
+	ActionTypeRead           ActionType = "can_view" // также доступно для note и reminder
+	ActionTypeCreateNote     ActionType = "can_create_note"
+	ActionTypeCreateReminder ActionType = "can_create_reminder"
+	ActionTypeManageMembers  ActionType = "can_manage_members"
+	ActionTypeManageSpace    ActionType = "can_manage_space"
+
+	// note.
+	ActionTypeCanUpdate ActionType = "can_update" // также доступно для reminder
+	ActionTypeCanDelete ActionType = "can_delete" // также доступно для reminder
+
+	// reminder.
+	ActionTypeCanStopReminder ActionType = "can_stop"
+)
+
 // Meta - метаданные ответа на запрос на обновление ресурса.
 type Meta struct {
-	AuthModelID string `json:"auth_model_id"`
+	AuthModelID string   `json:"auth_model_id"`
+	Subject     Subject  `json:"subject"`
+	Action      Action   `json:"action"`
+	Resource    Resource `json:"resource"`
+	Context     Context  `json:"context"`
 }
 
 // UpdateResourceResponse - ответ на запрос на обновление ресурса.
@@ -193,4 +252,40 @@ const (
 //		FormatEventType("NOTE", "DELETED") -> "NOTE_DELETED"
 func FormatEventType(eventTypePrefix, eventTypePostifx string) string {
 	return fmt.Sprintf("%s_%s", eventTypePrefix, eventTypePostifx)
+}
+
+type SubjectType string
+
+const (
+	SubjectTypeUser     SubjectType = "user"
+	SubjectTypeSpace    SubjectType = "space"
+	SubjectTypeNote     SubjectType = "note"
+	SubjectTypeReminder SubjectType = "reminder"
+)
+
+type Subject struct {
+	Resource
+	Relation string `json:"relation"`
+}
+
+type ActionName string
+
+const (
+	ActionNameCreate ActionName = "create"
+	ActionNameUpdate ActionName = "update"
+	ActionNameDelete ActionName = "delete"
+	ActionNameRead   ActionName = "read"
+	// ActionNameStop останавливает напоминание без удаления.
+	ActionNameStop ActionName = "stop"
+	// ActionNameAdd добавляет участника.
+	ActionNameAdd ActionName = "add"
+	// ActionNameEdit изменяет роль участника.
+	ActionNameEdit ActionName = "edit"
+	// ActionNameRemove удаляет участие пользователя.
+	ActionNameRemove ActionName = "remove"
+)
+
+type Action struct {
+	Name       ActionName     `json:"name"`
+	Attributes map[string]any `json:"attributes"`
 }

@@ -38,6 +38,7 @@ func TestNewResourceHandler(t *testing.T) {
 
 				return []resourceHandlerOption{
 					WithResourceService(mocks.NewMockresourceService(ctrl)),
+					WithDecisionService(mocks.NewMockdecisionService(ctrl)),
 				}
 			},
 			checkWant: func(t *testing.T, handler *ResourceHandler) {
@@ -45,6 +46,7 @@ func TestNewResourceHandler(t *testing.T) {
 
 				require.NotNil(t, handler)
 				require.NotNil(t, handler.resourceService)
+				require.NotNil(t, handler.decisionService)
 			},
 			wantErr: require.NoError,
 		},
@@ -63,6 +65,20 @@ func TestNewResourceHandler(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "resource service is not set")
+			},
+		},
+		{
+			name: "without decision service",
+			opts: func(t *testing.T, ctrl *gomock.Controller) []resourceHandlerOption {
+				t.Helper()
+				return []resourceHandlerOption{WithResourceService(mocks.NewMockresourceService(ctrl))}
+			},
+			checkWant: func(t *testing.T, handler *ResourceHandler) {
+				t.Helper()
+				require.Nil(t, handler)
+			},
+			wantErr: func(t require.TestingT, err error, _ ...any) {
+				require.EqualError(t, err, "decision service is not set")
 			},
 		},
 	}
@@ -96,6 +112,10 @@ func TestUpdateResource(t *testing.T) {
 		},
 		Context: model.Context{SourceService: "notes-service", EventType: "note.created", TraceID: "trace-id"},
 	}
+	space := model.UpdateResourceRequest{
+		RequestID: uuid.New(), TelegramID: 12345,
+		Resource: model.Resource{ID: uuid.New(), Type: model.ResourceTypeSpace}, Operation: model.OperationDelete,
+	}
 	applied := model.UpdateResourceResponse{
 		RequestID: note.RequestID, IdempotencyKey: note.IdempotencyKey,
 		Status: model.StatusCompleted, Result: model.ResultApplied, Resource: note.Resource, Meta: model.Meta{AuthModelID: "model-id"},
@@ -112,6 +132,7 @@ func TestUpdateResource(t *testing.T) {
 		return string(body)
 	}
 	noteBody := request(note)
+	spaceBody := request(space)
 	fail := func(cause error) func(*mocks.MockresourceService) {
 		return expectResourceUpdate(note, model.UpdateResourceResponse{Meta: applied.Meta}, cause)
 	}
@@ -141,6 +162,7 @@ func TestUpdateResource(t *testing.T) {
 		{"wrapped public details", withAudit, noteBody, "12345", fail(fmt.Errorf("outer: %w", detailed)), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "owner is required", publicDetails)},
 		{"wrapped sentinel", withAudit, noteBody, "12345", fail(fmt.Errorf("outer: %w", fga.ErrOwnerRequired)), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "outer: owner is required", nil)},
 		{"unknown cause with public details", withAudit, noteBody, "12345", fail(&fga.DetailedError{Err: errors.New("private failure"), Message: "details"}), http.StatusInternalServerError, expected(audit.ErrInternalServerError, "internal server error", &response.DetailedError{Message: "details"})},
+		{"space privacy denies deletion", withAudit, spaceBody, "12345", expectResourceUpdate(space, model.UpdateResourceResponse{}, fga.ErrSpacePrivacy), http.StatusBadRequest, expectedResourceFailure(space, model.Meta{}, audit.ErrCodeValidationFailed, "invalid space privacy operation", nil)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

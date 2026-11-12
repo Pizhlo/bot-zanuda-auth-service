@@ -19,6 +19,7 @@ import (
 // ResourceHandler - хендлер обновления ресурсов.
 type ResourceHandler struct {
 	resourceService resourceService // сервис обновления ресурса
+	decisionService decisionService
 }
 
 // resourceService - сервис обновления ресурса.
@@ -49,6 +50,10 @@ func NewResourceHandler(opts ...resourceHandlerOption) (*ResourceHandler, error)
 
 	if h.resourceService == nil {
 		return nil, errors.New("resource service is not set")
+	}
+
+	if h.decisionService == nil {
+		return nil, errors.New("decision service is not set")
 	}
 
 	return h, nil
@@ -107,7 +112,7 @@ func decodeResourceUpdate(c echo.Context, req *model.UpdateResourceRequest) erro
 	}
 
 	id, err := strconv.Atoi(header)
-	if err != nil {
+	if err != nil || !model.ValidTelegramID(header) {
 		return fmt.Errorf("invalid telegram id in header '%s'", userIDHeader)
 	}
 

@@ -13,6 +13,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDecisionRequestHeaderID(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+	for _, tc := range []struct {
+		name   string
+		values []string
+		want   uuid.UUID
+	}{
+		{"absent", nil, uuid.Nil},
+		{"empty", []string{""}, uuid.Nil},
+		{"malformed", []string{"bad"}, uuid.Nil},
+		{"zero", []string{uuid.Nil.String()}, uuid.Nil},
+		{"repeated", []string{id.String(), id.String()}, uuid.Nil},
+		{"valid", []string{id.String()}, id},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			header := make(http.Header)
+			for _, value := range tc.values {
+				header.Add(echo.HeaderXRequestID, value)
+			}
+
+			require.Equal(t, tc.want, decisionRequestHeaderID(header))
+		})
+	}
+}
+
 func TestRejectedRequestID(t *testing.T) {
 	t.Parallel()
 

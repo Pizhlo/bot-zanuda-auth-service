@@ -57,3 +57,26 @@ func TestSpaceMember_CanEditNote(t *testing.T) {
 		})
 	}
 }
+
+func TestIsOwner(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		role RoleCode
+		want bool
+	}{
+		{"stored owner code", OwnerRoleCode, true},
+		{"FGA owner relation", RoleCode("owner"), true},
+		{"admin", RoleCode("admin"), false},
+		{"empty", RoleCode(""), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.role.IsOwner()
+
+			require.Equal(t, tc.want, got)
+		})
+	}
+}

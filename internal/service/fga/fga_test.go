@@ -11,12 +11,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
-
-	"github.com/golang/mock/gomock"
-	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
+	"time"
 
 	"auth-service/internal/model"
 	"auth-service/internal/service/fga/mocks"
@@ -24,8 +22,11 @@ import (
 	"auth-service/pkg/audit"
 	"auth-service/pkg/audit/testaudit"
 
+	"github.com/golang/mock/gomock"
+	"github.com/google/uuid"
 	openfga "github.com/openfga/go-sdk"
 	openFGAClient "github.com/openfga/go-sdk/client"
+	"github.com/stretchr/testify/require"
 )
 
 type listStoresRequestStub struct {
@@ -214,120 +215,102 @@ func (s *writeRequestStub) GetContext() context.Context {
 	return s.ctx
 }
 
+type checkRequestStub struct {
+	ctx      context.Context
+	response *openFGAClient.ClientCheckResponse
+	err      error
+	body     *openFGAClient.ClientCheckRequest
+	options  *openFGAClient.ClientCheckOptions
+}
+
+func (s *checkRequestStub) Options(options openFGAClient.ClientCheckOptions) openFGAClient.SdkClientCheckRequestInterface {
+	s.options = &options
+	return s
+}
+
+func (s *checkRequestStub) Body(body openFGAClient.ClientCheckRequest) openFGAClient.SdkClientCheckRequestInterface {
+	s.body = &body
+	return s
+}
+
+func (s *checkRequestStub) Execute() (*openFGAClient.ClientCheckResponse, error) {
+	return s.response, s.err
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *checkRequestStub) GetAuthorizationModelIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.AuthorizationModelId
+}
+
+//nolint:revive // реализуем чужой интерфейс
+func (s *checkRequestStub) GetStoreIdOverride() *string {
+	if s.options == nil {
+		return nil
+	}
+
+	return s.options.StoreId
+}
+
+func (s *checkRequestStub) GetBody() *openFGAClient.ClientCheckRequest {
+	return s.body
+}
+
+func (s *checkRequestStub) GetOptions() *openFGAClient.ClientCheckOptions {
+	return s.options
+}
+
+func (s *checkRequestStub) GetContext() context.Context {
+	return s.ctx
+}
+
 func TestNewClient(t *testing.T) {
 	t.Parallel()
 
-	userRepo := mocks.NewMockuserRepo(gomock.NewController(t))
-
-	tests := []struct {
-		name    string
-		opts    []option
-		want    *Client
-		wantErr require.ErrorAssertionFunc
-	}{
-		{
-			name: "positive case",
-			opts: []option{
-				WithAPIURL("http://localhost:8080"),
-				WithAuthorizationModel("test"),
-				WithStoreID("test"),
-				WithStoreName("test"),
-				WithApplyModelOnStart(true),
-				WithUserRepo(userRepo),
-			},
-			want: &Client{
-				apiURL:             "http://localhost:8080",
-				authorizationModel: "test",
-				storeID:            "test",
-				storeName:          "test",
-				applyModelOnStart:  true,
-
-				userRepo: userRepo,
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "negative case: authorization model is required",
-			opts: []option{
-				WithAPIURL("http://localhost:8080"),
-				WithStoreID("test"),
-				WithStoreName("test"),
-				WithApplyModelOnStart(true),
-				WithUserRepo(userRepo),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "authorization model is required")
-			},
-		},
-		{
-			name: "negative case: api url is required",
-			opts: []option{
-				WithAuthorizationModel("test"),
-				WithStoreID("test"),
-				WithStoreName("test"),
-				WithApplyModelOnStart(true),
-				WithUserRepo(userRepo),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "api url is required")
-			},
-		},
-		{
-			name: "negative case: store id or store name is required",
-			opts: []option{
-				WithAuthorizationModel("test"),
-				WithAPIURL("http://localhost:8080"),
-				WithApplyModelOnStart(true),
-				WithUserRepo(userRepo),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "store id or store name is required")
-			},
-		},
-		{
-			name: "negative case: store id or store name is required",
-			opts: []option{
-				WithAuthorizationModel("test"),
-				WithAPIURL("http://localhost:8080"),
-				WithUserRepo(userRepo),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "store id or store name is required")
-			},
-		},
-
-		{
-			name: "negative case: user repo is required",
-			opts: []option{
-				WithAuthorizationModel("test"),
-				WithAPIURL("http://localhost:8080"),
-				WithStoreID("test"),
-				WithStoreName("test"),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "user repo is required")
-			},
-		},
+	wantError := func(message string) require.ErrorAssertionFunc {
+		return func(t require.TestingT, err error, _ ...any) { require.EqualError(t, err, "fga: "+message) }
 	}
+	wantNil := func(t *testing.T, got *Client, _ *mocks.MockuserRepo) { t.Helper(); require.Nil(t, got) }
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	wantReady := func(id, name string) func(*testing.T, *Client, *mocks.MockuserRepo) {
+		return func(t *testing.T, got *Client, repo *mocks.MockuserRepo) {
+			t.Helper()
+			require.Equal(t, &Client{requestTimeout: time.Second, apiURL: "http://localhost:8080", authorizationModel: "test", storeID: id, storeName: name, applyModelOnStart: true, userRepo: repo}, got)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		options []option
+		wantErr require.ErrorAssertionFunc
+		want    func(*testing.T, *Client, *mocks.MockuserRepo)
+	}{
+		{"store id and name", nil, require.NoError, wantReady("id", "name")},
+		{"only store id", []option{WithStoreName("")}, require.NoError, wantReady("id", "")},
+		{"only store name", []option{WithStoreID("")}, require.NoError, wantReady("", "name")},
+		{"missing model", []option{WithAuthorizationModel("")}, wantError("authorization model is required"), wantNil},
+		{"missing API URL", []option{WithAPIURL("")}, wantError("api url is required"), wantNil},
+		{"missing store", []option{WithStoreID(""), WithStoreName("")}, wantError("store id or store name is required"), wantNil},
+		{"missing user repo", []option{WithUserRepo(nil)}, wantError("user repo is required"), wantNil},
+		{"zero request timeout", []option{WithRequestTimeout(0)}, wantError("request timeout must be positive"), wantNil},
+		{"negative request timeout", []option{WithRequestTimeout(-time.Second)}, wantError("request timeout must be positive"), wantNil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := NewClient(tt.opts...)
-			tt.wantErr(t, err)
+			repo := mocks.NewMockuserRepo(gomock.NewController(t))
+			opts := slices.Concat([]option{
+				WithAPIURL("http://localhost:8080"), WithAuthorizationModel("test"),
+				WithStoreID("id"), WithStoreName("name"), WithApplyModelOnStart(true),
+				WithRequestTimeout(time.Second), WithUserRepo(repo),
+			}, tc.options)
 
-			require.Equal(t, tt.want, got)
+			got, err := NewClient(opts...)
+			tc.wantErr(t, err)
+
+			tc.want(t, got, repo)
 		})
 	}
 }
@@ -540,13 +523,11 @@ func TestCreateStore(t *testing.T) {
 			client := &Client{
 				fgaClient: mockClient,
 				storeName: storeName,
-
-				userRepo: userRepo,
+				userRepo:  userRepo,
 			}
 
 			err := client.createStore(t.Context())
 			tt.wantErr(t, err)
-
 			require.Equal(t, tt.wantStoreID, client.storeID)
 
 			require.NotNil(t, stub.body)
@@ -1369,6 +1350,29 @@ func TestWriteAuthorizationModel(t *testing.T) {
 	}
 }
 
+func writeAPIError(t *testing.T, status int, code string) error {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "write failed"})
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
+		ApiUrl: server.URL,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, sdkClient.SetStoreId("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
+
+	_, err = sdkClient.Write(t.Context()).Body(openFGAClient.ClientWriteRequest{}).Execute()
+	require.Error(t, err)
+
+	return err
+}
+
 func TestUpdateResource(t *testing.T) {
 	t.Parallel()
 
@@ -1440,6 +1444,22 @@ func TestUpdateResource(t *testing.T) {
 		require.NotContains(t, fields, audit.KeyUserID)
 		require.NotContains(t, fields, audit.KeySubject)
 	}
+	spaceRequest := func(change model.ChangeType) model.UpdateResourceRequest {
+		return model.UpdateResourceRequest{
+			Resource:  model.Resource{Type: model.ResourceTypeSpace, ID: spaceID, Attributes: map[string]any{model.AttributeSpaceType: "shared"}},
+			Relations: model.Relation{Owner: model.Resource{Type: model.ResourceTypeUser, ID: ownerID}},
+			Operation: model.OperationCreate, ChangeType: change, Context: model.Context{EventType: model.FormatEventType(model.EventTypePrefixSpace, model.EventTypeOperationCreatedPostfix)},
+		}
+	}
+	expectSpaceRead := func(readErr error) func(*testing.T, *mocks.MockSdkClient, *mocks.MockuserRepo) *writeRequestStub {
+		return func(_ *testing.T, api *mocks.MockSdkClient, repo *mocks.MockuserRepo) *writeRequestStub {
+			gomock.InOrder(repo.EXPECT().GetUserIDByTelegramID(gomock.Any(), "0").Return(ownerID, nil),
+				api.EXPECT().Read(gomock.Any()).Return(&tupleReadStub{response: &openFGAClient.ClientReadResponse{}, err: readErr}))
+
+			return nil
+		}
+	}
+
 	tests := []struct {
 		name       string
 		startAudit func(*testing.T, *resourceAuditCapture) (context.Context, func(error))
@@ -1462,6 +1482,24 @@ func TestUpdateResource(t *testing.T) {
 			wantWrite:  skipWriteCheck,
 			wantAudit:  noIdentity,
 			wantErr:    func(t require.TestingT, err error, _ ...any) { require.ErrorIs(t, err, audit.ErrMissingAttempt) },
+		},
+		{
+			name:       "membership_added with create cannot create a missing space",
+			req:        spaceRequest(model.ChangeTypeMembershipAdded),
+			startAudit: startAudit,
+			wantAudit:  wantIdentity,
+			setupMocks: expectSpaceRead(nil),
+			wantWrite:  skipWriteCheck,
+			wantErr:    func(t require.TestingT, err error, _ ...any) { require.ErrorIs(t, err, ErrSpacePrivacy) },
+		},
+		{
+			name:       "failed read blocks create before write",
+			req:        spaceRequest(model.ChangeTypeResourceAdded),
+			startAudit: startAudit,
+			wantAudit:  wantIdentity,
+			setupMocks: expectSpaceRead(context.DeadlineExceeded),
+			wantWrite:  skipWriteCheck,
+			wantErr:    func(t require.TestingT, err error, _ ...any) { require.ErrorIs(t, err, context.DeadlineExceeded) },
 		},
 		{
 			startAudit: startAudit,
@@ -1706,7 +1744,7 @@ func TestUpdateResource(t *testing.T) {
 			client := &Client{
 				fgaClient: mockClient,
 				modelID:   modelID,
-				userRepo:  userRepo,
+				userRepo:  userRepo, requestTimeout: time.Second,
 			}
 
 			var output bytes.Buffer
@@ -2756,6 +2794,23 @@ func TestCheckEventType(t *testing.T) {
 	}
 }
 
+func TestWithRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	var c Client
+
+	WithRequestTimeout(time.Second)(&c)
+
+	require.Equal(t, time.Second, c.requestTimeout)
+}
+
+func TestConnect(t *testing.T) {
+	t.Parallel()
+
+	c := Client{apiURL: "://invalid", requestTimeout: time.Second}
+	require.Error(t, c.Connect(t.Context()))
+}
+
 func TestTupleWriteFailure(t *testing.T) {
 	t.Parallel()
 
@@ -2810,6 +2865,7 @@ func TestTupleWriteFailure(t *testing.T) {
 	}
 }
 
+// resourceAuditCapture сохраняет контекст единственной попытки в памяти.
 type resourceAuditCapture struct {
 	audit.Event
 	fields audit.EventContext
@@ -2823,25 +2879,9 @@ func (s *resourceAuditCapture) AppendContext(fields audit.EventContext) {
 	}
 }
 
-func writeAPIError(t *testing.T, status int, code string) error {
-	t.Helper()
+func TestModelID(t *testing.T) {
+	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "write failed"})
-	}))
-	t.Cleanup(server.Close)
-
-	sdkClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
-		ApiUrl: server.URL,
-	})
-	require.NoError(t, err)
-
-	require.NoError(t, sdkClient.SetStoreId("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
-
-	_, err = sdkClient.Write(t.Context()).Body(openFGAClient.ClientWriteRequest{}).Execute()
-	require.Error(t, err)
-
-	return err
+	c := Client{modelID: "pinned"}
+	require.Equal(t, "pinned", c.ModelID())
 }

@@ -54,19 +54,19 @@ The system SHALL log authentication, validation, identity-resolution, idempotenc
 
 The system SHALL return authorization decisions as `allow` or `deny` and SHALL NOT delegate authorization decisions to clients.
 
-For `deny` decisions, the system SHALL include a machine-readable `reason_code` field.
+Completed checks SHALL return result/allow and a reasons array; reasons is empty unless include_reasons is true.
 
-For `allow` decisions, the system MAY include a `reason_code` field.
+Reason codes SHALL describe only checks actually performed.
 
-The planned authorization check API SHALL use the action-to-object-and-relation mapping defined in `specs/auth-service/spec.md`.
+The authorization check API SHALL use the action-to-object-and-relation mapping defined in `specs/auth-service/spec.md`.
 
-For planned `member:*` actions, `target_user_id` SHALL be required.
+For `member:*` actions, the target user UUID SHALL be supplied in `resource.id`; `target_user_id` is its audit field name.
 
-For planned `member:add` and `member:edit` actions, `role` SHALL be required.
+For `member:add` and `member:edit` actions, `role` SHALL be required.
 
-For planned member authorization audit records, the system SHALL record the checked OpenFGA object and relation, `target_user_id`, and the requested role when applicable.
+For member authorization audit records, the system SHALL record the checked OpenFGA object and relation, `target_user_id`, and the requested role when applicable.
 
-The system SHALL query OpenFGA for every planned authorization request.
+Every completed decision SHALL require a successful OpenFGA call. Shared space creation reads the pinned model. Other operations check the relevant relationship. For personal space creation, check the verified user’s has_personal_space relation with higher consistency and allow creation only when the relation is absent.
 
 The system SHALL NOT cache authorization decisions unless an explicit cache and invalidation design is approved.
 
@@ -84,11 +84,14 @@ The legacy `politics` service SHALL NOT be used as an authorization source.
 
 The `internal/service/politics` package is legacy and SHALL NOT be used by new code.
 
-The `internal/service/enforcer` package is reserved for future Casbin integration and SHALL NOT replace OpenFGA.
+The internal/service/enforcer package SHALL provide immutable Casbin field policy after OpenFGA permission checks, without a separate role source.
 
-The root `casbin_model.conf` is reserved for future domain-specific Casbin rules and SHALL NOT be used for current space, note, reminder, or member authorization.
+Field-policy model and rules SHALL be embedded in the binary and SHALL allow only note text/title, reminder remind_at/title and space name.
 
-## Resource Synchronization Idempotency
+## Resource Synchronization Idempotency (future separate task)
+
+The following requirements are not implemented by BZ-167. The user explicitly deferred the full reservation/replay/TTL/recovery mechanism to a separate task. The existing idempotency_key is metadata only.
+
 
 Every `UpdateResourceRequest` SHALL be processed under an idempotency scope owned by the authenticated service client.
 
@@ -100,9 +103,9 @@ The service SHALL calculate and persist a canonical fingerprint of the complete 
 
 The service SHALL persist the complete successful `UpdateResourceResponse` before making the result available for replay.
 
-An identical retry SHALL return the persisted response and SHALL NOT create a new audit record or execute another OpenFGA write.
+An identical retry SHALL return the persisted `UpdateResourceResponse` only when the reservation is completed. If the reservation is still active, the retry SHALL return HTTP 409 `idempotency_in_progress` without waiting for the owner. In both cases the retry SHALL emit its own HTTP request audit event, create no new authorization decision and make no OpenFGA call.
 
-A retry with the same idempotency key and a different fingerprint SHALL return an idempotency conflict error and SHALL NOT execute an OpenFGA write.
+A retry with the same scoped idempotency key and a different fingerprint SHALL return HTTP 409 Conflict. The service SHALL record exactly one terminal operational HTTP audit event for the rejected attempt, create no new authorization decision and perform no OpenFGA write.
 
 Only the request that successfully reserves an idempotency key may execute the corresponding OpenFGA write.
 
@@ -122,7 +125,7 @@ The service SHALL NOT blindly repeat the OpenFGA write while the result of the p
 
 Successful authorization decisions and authorization denials SHALL use the Authorization Response Contract in `specs/auth-service/spec.md`.
 
-Infrastructure failures, including OpenFGA unavailability, SHALL use the Error Response Contract and SHALL NOT be required to contain `decision` or `reason_code`.
+Infrastructure failures, including OpenFGA unavailability, SHALL use the Error Response Contract and SHALL NOT be required to contain `result` or `allow`.
 
 Idempotency conflicts SHALL use the Error Response Contract and SHALL return HTTP 409 Conflict.
 
@@ -147,3 +150,6 @@ All changes to the OpenFGA model SHALL update `specs/auth-service/spec.md` and t
 All changes to authorization action mappings SHALL update `specs/auth-service/spec.md`, handlers, and tests.
 
 CI checks SHALL validate the canonical specification at `specs/auth-service/spec.md`.
+## Space Privacy
+
+Personal is a built-in system space: only its owner can access it and its contents. No user, including the owner, can delete the space or manage its membership. Records inside it remain editable/deletable according to their own actions. For an existing space, the trusted type SHALL be read from OpenFGA and clients SHALL omit space_type. A space:create request SHALL provide the proposed resource.attributes.space_type. Unknown/conflicting types fail closed. Shared retains the existing role hierarchy; only the space owner may rename or delete shared.

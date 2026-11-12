@@ -1,0 +1,9 @@
+# Формат строки: p, тип ресурса, действие, поле. Для update разрешены перечисленные поля.
+# Заметка: текст и заголовок.
+p, note, update, text
+p, note, update, title
+# Напоминание: время срабатывания и заголовок.
+p, reminder, update, remind_at
+p, reminder, update, title
+# Пространство: отображаемое имя.
+p, space, update, name

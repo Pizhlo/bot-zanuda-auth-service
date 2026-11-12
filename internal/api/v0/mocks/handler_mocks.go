@@ -108,6 +108,20 @@ func (m *MockresourcesProcessorHandler) EXPECT() *MockresourcesProcessorHandlerM
 	return m.recorder
 }
 
+// CheckDecision mocks base method.
+func (m *MockresourcesProcessorHandler) CheckDecision(c echo.Context) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CheckDecision", c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CheckDecision indicates an expected call of CheckDecision.
+func (mr *MockresourcesProcessorHandlerMockRecorder) CheckDecision(c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*MockresourcesProcessorHandler)(nil).CheckDecision), c)
+}
+
 // UpdateResource mocks base method.
 func (m *MockresourcesProcessorHandler) UpdateResource(c echo.Context) error {
 	m.ctrl.T.Helper()

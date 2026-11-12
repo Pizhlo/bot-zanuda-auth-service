@@ -1,16 +1,15 @@
 package response_test
 
 import (
+	"auth-service/internal/api/internal/response"
+	"auth-service/internal/model"
+	"auth-service/internal/service/fga"
+	"auth-service/pkg/audit"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"testing"
-
-	"auth-service/internal/api/internal/response"
-	"auth-service/internal/model"
-	"auth-service/internal/service/fga"
-	"auth-service/pkg/audit"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"

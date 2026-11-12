@@ -58,6 +58,8 @@ type healthHandler interface {
 type resourcesEditor interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(c echo.Context) error
+	// CheckDecision проверяет решение.
+	CheckDecision(c echo.Context) error
 }
 
 type notesEditor interface {
@@ -67,10 +69,11 @@ type notesEditor interface {
 }
 
 type middlewareHandler interface {
+	AuditDecision(next echo.HandlerFunc) echo.HandlerFunc
 	AuditNotesFilter(next echo.HandlerFunc) echo.HandlerFunc
 	AuditResourceUpdate(next echo.HandlerFunc) echo.HandlerFunc
 	// CheckToken применяет требования маршрута к сервисному JWT.
-	CheckToken(next echo.HandlerFunc) echo.HandlerFunc
+	CheckToken(contract handlerV0.TokenContract) echo.MiddlewareFunc
 }
 
 // Option - опция для настройки сервера.
@@ -178,6 +181,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) createRoutes() error {
 	e := echo.New()
+	e.HTTPErrorHandler = handlerV0.DecisionHTTPErrorHandler
 
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
@@ -206,7 +210,7 @@ func (s *Server) createRoutes() error {
 
 	auth.POST("login", s.api.h0.Login)
 
-	resourceToken := s.api.middleware.CheckToken
+	resourceToken := s.api.middleware.CheckToken(handlerV0.ResourceToken)
 	notes := auth.POST("notes/filter", s.api.h0.FilterNotes, resourceToken)
 
 	resources := apiv0.Group("resources/")
@@ -215,6 +219,9 @@ func (s *Server) createRoutes() error {
 	missingResource := resources.RouteNotFound("", echo.NotFoundHandler, resourceToken)
 	missingResourcePath := resources.RouteNotFound("/*", echo.NotFoundHandler, resourceToken)
 
+	decisions := apiv0.Group("decisions/")
+	check := decisions.POST("check", s.api.h0.CheckDecision, s.api.middleware.CheckToken(handlerV0.DecisionToken))
+
 	// Echo уже выбрал маршрут. Сначала открываем аудит пользовательской операции,
 	// затем выполняем общие middleware, проверку токена и обработчик.
 	e.Use(auditMatchedRequests(map[*echo.Route]echo.MiddlewareFunc{
@@ -222,6 +229,7 @@ func (s *Server) createRoutes() error {
 		update:              s.api.middleware.AuditResourceUpdate,
 		missingResource:     s.api.middleware.AuditResourceUpdate,
 		missingResourcePath: s.api.middleware.AuditResourceUpdate,
+		check:               s.api.middleware.AuditDecision,
 	}))
 	e.Use(requestLogger())
 	// Сохраняем префикс webserver_ у опубликованных HTTP-метрик.
@@ -233,10 +241,7 @@ func (s *Server) createRoutes() error {
 		return errors.New("no routes initialized")
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"routes": len(s.e.Routes()),
-		"port":   s.port,
-	}).Info("routes initialized")
+	logrus.WithField("routes", len(e.Routes())).WithField("port", s.port).Info("routes initialized")
 
 	return nil
 }
