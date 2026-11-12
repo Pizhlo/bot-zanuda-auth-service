@@ -10,6 +10,13 @@ specs/auth-service/spec.md
 
 Do not use a bare `spec.md` reference in code, tests, CI rules, or documentation.
 
+## Important files
+You should read also these files:
+- `AGENTS-go.md` - rules about writing code on Go.
+- `docs/codestyle/go-engineering-guide.md` — architecture, Go idioms, errors, database, concurrency and reliability.
+- `docs/codestyle/testing-guidelines.md` — test rules and mandatory checks.
+- `docs/codestyle/architecture-examples.md` — solution selection examples. These examples are for informational purposes only; do not copy them without adapting them to the project's API.
+
 ## Tech Stack
 
 - Go 1.26+
