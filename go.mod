@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/google/uuid v1.6.0
-	github.com/labstack/echo/v4 v4.15.3
+	github.com/labstack/echo/v4 v4.16.3
 	github.com/openfga/language/pkg/go v0.2.1
 	github.com/rabbitmq/amqp091-go v1.14.0
 	github.com/redis/go-redis/v9 v9.14.0
@@ -53,7 +53,7 @@ require (
 	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
@@ -81,12 +81,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
-	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
@@ -110,6 +110,6 @@ require (
 	github.com/simukti/sqldb-logger/logadapter/logrusadapter v0.0.0-20230108155151-646c1a075551
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/echo-swagger v1.4.1
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0
 )
