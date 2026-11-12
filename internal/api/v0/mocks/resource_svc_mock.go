@@ -35,21 +35,6 @@ func (m *MockresourceService) EXPECT() *MockresourceServiceMockRecorder {
 	return m.recorder
 }
 
-// CheckDecision mocks base method.
-func (m *MockresourceService) CheckDecision(ctx context.Context, req model.CheckDecisionRequest) (model.CheckDecisionResponse, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CheckDecision", ctx, req)
-	ret0, _ := ret[0].(model.CheckDecisionResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CheckDecision indicates an expected call of CheckDecision.
-func (mr *MockresourceServiceMockRecorder) CheckDecision(ctx, req interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CheckDecision", reflect.TypeOf((*MockresourceService)(nil).CheckDecision), ctx, req)
-}
-
 // UpdateResource mocks base method.
 func (m *MockresourceService) UpdateResource(ctx context.Context, req model.UpdateResourceRequest) (model.UpdateResourceResponse, error) {
 	m.ctrl.T.Helper()

@@ -3,6 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -21,10 +22,11 @@ type Client struct {
 	maxRetries     int
 	retryBackoff   time.Duration
 
-	mu      sync.Mutex
-	conn    *amqp091.Connection
-	channel *amqp091.Channel
-	topics  []string
+	mu        sync.RWMutex
+	transport net.Conn
+	conn      *amqp091.Connection
+	channel   *amqp091.Channel
+	topics    []string
 }
 
 // Option - опция для настройки клиента RabbitMQ.
@@ -125,15 +127,14 @@ func (s *Client) Run(ctx context.Context) error {
 	)
 
 	var (
-		conn *amqp091.Connection
-		ch   *amqp091.Channel
+		conn      *amqp091.Connection
+		ch        *amqp091.Channel
+		transport net.Conn
 	)
 
 	operation := func() error {
 		// Dial
-		c, err := amqp091.DialConfig(s.url, amqp091.Config{
-			Dial: amqp091.DefaultDial(s.connectTimeout),
-		})
+		c, raw, err := s.dial()
 		if err != nil {
 			return fmt.Errorf("dial: %w", err)
 		}
@@ -154,7 +155,7 @@ func (s *Client) Run(ctx context.Context) error {
 		}
 
 		// Success
-		conn, ch = c, channel
+		conn, ch, transport = c, channel, raw
 
 		return nil
 	}
@@ -166,12 +167,30 @@ func (s *Client) Run(ctx context.Context) error {
 
 	s.conn = conn
 	s.channel = ch
+	s.transport = transport
 
 	logrus.WithFields(logrus.Fields{
 		"topics": len(s.topics),
 	}).Info("rabbitmq connected")
 
 	return nil
+}
+
+func (s *Client) dial() (*amqp091.Connection, net.Conn, error) {
+	var transport net.Conn
+
+	conn, err := amqp091.DialConfig(s.url, amqp091.Config{
+		Dial: func(network, address string) (net.Conn, error) {
+			connection, err := amqp091.DefaultDial(s.connectTimeout)(network, address)
+			if err == nil {
+				transport = connection
+			}
+
+			return connection, err
+		},
+	})
+
+	return conn, transport, err
 }
 
 func declareQueues(channel *amqp091.Channel, topics []string) error {
@@ -206,30 +225,54 @@ func (s *Client) Stop(_ context.Context) error {
 
 	s.conn = nil
 	s.channel = nil
+	s.transport = nil
 
 	return nil
 }
 
 // Publish отправляет сообщение в RabbitMQ.
 func (s *Client) Publish(ctx context.Context, topic string, data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	conn, ch, transport := s.conn, s.channel, s.transport
+	s.mu.RUnlock()
 
-	if s.conn == nil {
+	if conn == nil {
 		return fmt.Errorf("rabbitmq connection is not connected")
 	}
 
-	if s.channel == nil {
+	if ch == nil {
 		return fmt.Errorf("rabbitmq channel is not connected")
 	}
-
-	ch := s.channel
 
 	ctx, cancel := context.WithTimeout(ctx, s.publishTimeout)
 	defer cancel()
 
-	return ch.PublishWithContext(ctx, "", topic, false, false, amqp091.Publishing{
-		ContentType: "application/json",
-		Body:        data,
+	return publishWithCancellation(ctx, transport, func() error {
+		return ch.PublishWithContext(ctx, "", topic, false, false, amqp091.Publishing{
+			ContentType: "application/json", Body: data,
+		})
 	})
+}
+
+// SDK не прерывает начатый Publish по context. Закрытие транспорта освобождает
+// сетевую запись и ожидающие её публикации, не создавая фоновых зависших workers.
+func publishWithCancellation(ctx context.Context, transport net.Conn, publish func() error) error {
+	if transport == nil {
+		return fmt.Errorf("rabbitmq transport is not connected")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	stop := context.AfterFunc(ctx, func() { _ = transport.Close() })
+	defer stop()
+
+	err := publish()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return err
 }

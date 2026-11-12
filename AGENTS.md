@@ -15,7 +15,7 @@ You should read also these files:
 - `AGENTS-go.md` - rules about writing code on Go.
 - `docs/codestyle/go-engineering-guide.md` — architecture, Go idioms, errors, database, concurrency and reliability.
 - `docs/codestyle/testing-guidelines.md` — test rules and mandatory checks.
-- `docs/codestyle/architecture-examples.md` — solution selection examples. These examples are for informational purposes only; do not copy them without adapting them to the project's API.
+- `docs/codestyle/go-architecture-examples.md` — solution selection examples. These examples are for informational purposes only; do not copy them without adapting them to the project's API.
 
 ## Tech Stack
 
@@ -61,7 +61,7 @@ make containers-down  # stop the local environment
 - OpenFGA is the authoritative relationship and authorization model for spaces, notes, reminders, and members.
 - The current implemented resource synchronization API writes relationships to OpenFGA.
 - Casbin MAY be used for domain-specific authorization rules that are not expressible in OpenFGA.
-- The request-based authorization check API is planned and SHALL NOT be treated as implemented.
+- The check API contract is POST /v0/decisions/check as defined in specs/auth-service/spec.md.
 - The canonical OpenFGA model is `./fga/auth-model.fga`.
 
 ## Implemented Service Responsibilities
@@ -70,8 +70,8 @@ make containers-down  # stop the local environment
 - Validate active service clients and requested scopes.
 - Obtain client secrets from Vault.
 - Synchronize spaces, notes, reminders, owners, parent relations, and membership relations to OpenFGA.
-- Enforce idempotency for `UpdateResource`.
-- Preserve idempotency scope, canonical request fingerprint, processing ownership, stored response, and expiration time.
+- Preserve the `UpdateResource` idempotency metadata contract; reservation/replay/TTL/recovery are a separate future task.
+- Do not claim idempotency until its separate implementation is delivered.
 - Return applied OpenFGA tuple changes and the authorization model ID.
 
 ## Required Headers
@@ -107,9 +107,12 @@ make containers-down  # stop the local environment
 - `membership_removed` must use `delete`.
 - Notes and reminders require a parent `space` relation.
 - Notes and reminders require an owner `user` relation when created.
-- Do not change OpenFGA relations without preserving `UpdateResource` idempotency.
+- BZ-167 synchronizes type markers and privacy guards; it does not implement `UpdateResource` idempotency.
 
-## UpdateResource Idempotency
+## UpdateResource Idempotency (separate future task)
+
+The user explicitly excluded implementing this section from BZ-167. The mechanism below is not present yet; do not claim that idempotency_key provides replay/reservation/recovery. Preserve the existing metadata contract while implementing the separate check and privacy work.
+
 
 - Scope idempotency by authenticated service-client identity and `idempotency_key`.
 - Atomically reserve the key before calling OpenFGA.
@@ -128,9 +131,9 @@ make containers-down  # stop the local environment
 - A recovery worker or reconciliation process must determine whether the OpenFGA write was applied.
 - Do not blindly repeat an OpenFGA write while the result of the previous attempt is unknown.
 
-## Authorization Mapping (Planned)
+## Authorization Mapping
 
-The following mapping describes the planned authorization check API.
+The following mapping is part of the check contract; see the canonical specification for space and protected-member rules.
 
 - `note:create` checks `can_create_note` on `space:<space_id>`.
 - `note:read` checks `can_view` on `note:<note_id>`.
@@ -142,17 +145,17 @@ The following mapping describes the planned authorization check API.
 - `reminder:stop` checks `can_stop` on `reminder:<reminder_id>` and is non-destructive.
 - `reminder:delete` checks `can_delete` on `reminder:<reminder_id>` and is destructive.
 - `member:add`, `member:remove`, and `member:edit` check `can_manage_members` on `space:<space_id>`.
-- All `member:*` actions require `target_user_id`.
+- All `member:*` actions use `resource.id` as the target user UUID; audit names this value `target_user_id`.
 - `member:add` and `member:edit` also require `role`.
 - Supported member roles are `viewer`, `editor`, and `admin`.
 - `member:add` and `member:edit` MUST NOT assign the `owner` relation.
 - Do not use `space_id` instead of `note_id` or `reminder_id` for checks on existing notes or reminders.
 
-## Authorization Response Contract (Planned)
+## Authorization Response Contract
 
-- A completed authorization check returns `decision="allow"` or `decision="deny"`.
-- `reason_code` is mandatory for `deny`.
-- `reason_code` is optional for `allow`.
+- A completed check returns result="allow"/"deny", matching boolean allow, decision_id/request_id, reasons and meta.
+- reasons defaults to []; populated only when include_reasons=true.
+- subject.relation, is_admin and a duplicate body user_id are not part of the check contract.
 - This contract does not apply to 4xx/5xx errors or dependency failures.
 
 ## Error Contract
@@ -170,7 +173,7 @@ The following mapping describes the planned authorization check API.
 
 - Model file: `./fga/auth-model.fga`.
 - Use the configured OpenFGA SDK and client.
-- Planned authorization checks must query OpenFGA for every request.
+- Authorization checks query OpenFGA for every request except space:create, permitted to every registered trusted subject.
 - Do not cache authorization decisions unless a cache/invalidation design is explicitly approved.
 - Treat OpenFGA unavailability as a failed authorization operation.
 - Do not modify `fga/auth-model.fga` without updating `specs/auth-service/spec.md` and tests.
@@ -178,7 +181,7 @@ The following mapping describes the planned authorization check API.
 
 ## Audit Requirements
 
-For every completed planned OpenFGA check, log:
+For every completed OpenFGA check, log:
 
 - Caller identity.
 - Internal subject user ID.
@@ -254,9 +257,9 @@ Never log:
 - New authorization behavior SHALL use OpenFGA for spaces, notes, reminders, and members.
 - The package MAY be removed in a separate cleanup change after all references are eliminated.
 
-- `internal/service/enforcer/` is reserved for future Casbin integration.
+- internal/service/enforcer provides the immutable embedded Casbin field policy.
 - It SHALL NOT replace OpenFGA for spaces, notes, reminders, or members.
-- The root `casbin_model.conf` is reserved for future domain-specific Casbin rules.
+- Field policy is role-independent: note text/title; reminder remind_at/title; space name. Technical/unknown fields deny the whole update.
 
 New authorization code SHALL NOT use `internal/service/politics`.
 
@@ -297,3 +300,16 @@ For host/host, do not require `integration-up` or invoke Docker: seed and pytest
 on the host with the same `PYTEST_CONFIG` (default: pytests' `config.yaml`). Do not
 rewrite or commit the user's local YAML files. Data is prepared by pytest or a
 standalone Make command. Compose overlays are only needed for container or mixed modes.
+
+## BZ-167 Space Contract
+
+- Personal spaces are built-in system storage. Even the owner cannot delete the space or manage members.
+- Only the personal-space owner may access its records; an incorrect direct owner tuple on a child must not bypass this.
+- Shared space roles retain their hierarchy; shared deletion is owner-only.
+- Synchronize personal/shared type and owner together through UpdateResource. Never infer type from request check attributes.
+- Update the model, canonical specification and tests together. Migration and rollback must preserve personal privacy.
+
+## BZ-167 operational documents
+
+- `docs/decisions-api.md` — exact request fields, errors and executable examples.
+- `docs/space-types-migration.md` — offline migration and safe rollback; no automatic production migration.

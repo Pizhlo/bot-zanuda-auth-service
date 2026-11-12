@@ -14,7 +14,7 @@ import (
 //	@Summary		Проверить состояние сервера и соединения
 //	@Description	Проверить состояние сервера и соединения
 //	@Success		200
-//	@Router			/health [get]
+//	@Router			/api/v0/health [get]
 func (s *Handler) Health(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"version":   s.version,

@@ -10,33 +10,45 @@ type space
     define editor: [user] or admin
     define viewer: [user] or editor
 
-    define can_view: viewer
-    define can_create_note: editor
-    define can_create_reminder: editor
-    define can_manage_members: admin
-    define can_manage_space: owner
+    # Служебные признаки не дают права сами по себе. Оба или ни одного — отказ.
+    define personal: [user:*]
+    define shared: [user:*]
+    define personal_only: personal but not shared
+    define shared_only: shared but not personal
+    define known_type: personal_only or shared_only
+    define known_owner: owner and known_type
+    define shared_viewer: viewer and shared_only
+    define shared_editor: editor and shared_only
+
+    define can_view: known_owner or shared_viewer
+    define can_create_note: known_owner or shared_editor
+    define can_create_reminder: known_owner or shared_editor
+    define can_manage_members: admin and shared_only
+    # Это право владельца на имя и записи. Для удаления пространства оно не подходит.
+    define can_manage_space: known_owner
+    define can_delete: owner and shared_only
+    define personal_owner: owner and personal_only
+    define can_access_owned_objects: shared_only or personal_owner
 
 type note
   relations
     define space: [space]
     define owner: [user]
-
-    define viewer: owner or can_view from space
-    define editor: owner or can_create_note from space
-
+    define accessible_owner: owner and can_access_owned_objects from space
+    define viewer: accessible_owner or can_view from space
+    define editor: accessible_owner or can_create_note from space
     define can_view: viewer
     define can_update: editor
-    define can_delete: owner or can_manage_space from space
+    define can_delete: accessible_owner or can_manage_space from space
 
 type reminder
   relations
     define space: [space]
     define owner: [user]
-
-    define viewer: owner or can_view from space
-    define editor: owner or can_create_reminder from space
-
+    define accessible_owner: owner and can_access_owned_objects from space
+    define viewer: accessible_owner or can_view from space
+    define editor: accessible_owner or can_create_reminder from space
     define can_view: viewer
     define can_update: editor
-    define can_delete: owner or can_manage_space from space
-    define can_stop: owner or editor
+    define can_delete: accessible_owner or can_manage_space from space
+    define can_stop: editor

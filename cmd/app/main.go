@@ -2,6 +2,8 @@ package main
 
 import (
 	"auth-service/internal/config"
+	"auth-service/internal/service/decision"
+	"auth-service/internal/service/enforcer"
 	"auth-service/internal/storage/rabbitmq"
 	"auth-service/pkg/audit"
 	"context"
@@ -17,7 +19,7 @@ import (
 // @version         1.0
 // @description     API для работы с авторизацией
 // @host            localhost:8080
-// @basePath        /api/v0
+// @basePath        /
 // @securityDefinitions.apikey BearerAuth
 // @in header
 // @name Authorization
@@ -102,6 +104,10 @@ func main() {
 
 	defer butler.stop(notifyCtx, fga)
 
+	if err := fga.EnsureDecisionModel(notifyCtx); err != nil {
+		logrus.WithError(err).Fatal("decision authorization model is not ready")
+	}
+
 	authSvc := initAuthService(vaultClient, config.Auth, repo, auditor)
 
 	spaceAccessChecker := initSpaceAccessChecker(repo)
@@ -114,7 +120,9 @@ func main() {
 
 	userSvc := initUserService(repo, redis, config.Auth, auditor)
 
-	resourcesHandler := initResourcesHandler(fga)
+	fieldPolicy := start(enforcer.NewFieldPolicy())
+	decisions := start(decision.New(repo, fga, fieldPolicy, auditor))
+	resourcesHandler := initResourcesHandler(fga, decisions)
 	authHandler := initAuthHandler(authSvc)
 	notesHandler := initNotesHandler(politicsSvc, userSvc)
 	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler, resourcesHandler)

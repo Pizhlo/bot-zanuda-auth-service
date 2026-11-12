@@ -86,7 +86,7 @@ func NewNotesHandler(opts ...notesHandlerOption) (*NotesHandler, error) {
 //	@Failure		403		{object}	map[string]string	"Нет доступа к запрошенным заметкам"
 //	@Failure		500		{object}	map[string]string	"Внутренняя ошибка сервера"
 //	@Security	BearerAuth
-//	@Router		/auth/notes/filter [post]
+//	@Router		/api/v0/auth/notes/filter [post]
 func (s *NotesHandler) FilterNotes(c echo.Context) error {
 	var req model.FilterNotesRequest
 

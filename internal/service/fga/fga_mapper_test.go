@@ -82,11 +82,10 @@ func TestTuplesFromRequest(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		req         model.UpdateResourceRequest
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		req        model.UpdateResourceRequest
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name: "create note",
@@ -129,10 +128,9 @@ func TestTuplesFromRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesFromRequest(tt.req)
+			writes, err := tuplesFromRequest(tt.req)
 			tt.wantErr(t, err)
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }
@@ -146,12 +144,11 @@ func TestTuplesForCreate(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		resource    model.Resource
-		relations   model.Relation
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		resource   model.Resource
+		relations  model.Relation
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name:     "create note with owner and parent",
@@ -249,10 +246,9 @@ func TestTuplesForCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesForCreate(tt.resource, tt.relations)
+			writes, err := tuplesForCreate(tt.resource, tt.relations)
 			tt.wantErr(t, err)
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }
@@ -457,247 +453,6 @@ func TestToModelTuples(t *testing.T) {
 			gotWritten, gotDeleted := toModelTuples(tt.writes, tt.deletes)
 			require.Equal(t, tt.wantWritten, gotWritten)
 			require.Equal(t, tt.wantDeleted, gotDeleted)
-		})
-	}
-}
-
-func TestToOpenFGACheckDecisionRequest(t *testing.T) {
-	t.Parallel()
-
-	subjectID := uuid.New()
-	noteID := uuid.New()
-	spaceID := uuid.New()
-	reminderID := uuid.New()
-
-	subject := model.Subject{
-		Resource: model.Resource{
-			ID:   subjectID,
-			Type: model.ResourceTypeUser,
-		},
-	}
-
-	tests := []struct {
-		name    string
-		req     model.CheckDecisionRequest
-		want    openFGAClient.ClientCheckRequest
-		wantErr require.ErrorAssertionFunc
-	}{
-		{
-			name: "read note",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameRead},
-				Resource: model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeRead),
-				Object:   formatObject(model.Resource{ID: noteID, Type: model.ResourceTypeNote}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "create note",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameCreate},
-				Resource: model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeCreateNote),
-				Object:   formatObject(model.Resource{ID: noteID, Type: model.ResourceTypeNote}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "create reminder",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameCreate},
-				Resource: model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeCreateReminder),
-				Object:   formatObject(model.Resource{ID: reminderID, Type: model.ResourceTypeReminder}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "update note",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameUpdate},
-				Resource: model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeCanUpdate),
-				Object:   formatObject(model.Resource{ID: noteID, Type: model.ResourceTypeNote}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "delete note",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameDelete},
-				Resource: model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeCanDelete),
-				Object:   formatObject(model.Resource{ID: noteID, Type: model.ResourceTypeNote}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "stop reminder",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameStopReminder},
-				Resource: model.Resource{ID: reminderID, Type: model.ResourceTypeReminder},
-			},
-			want: openFGAClient.ClientCheckRequest{
-				User:     formatObject(model.Resource{ID: subjectID, Type: model.ResourceTypeUser}),
-				Relation: string(model.ActionTypeCanStopReminder),
-				Object:   formatObject(model.Resource{ID: reminderID, Type: model.ResourceTypeReminder}),
-			},
-			wantErr: require.NoError,
-		},
-		{
-			name: "create on space returns unknown resource type",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionNameCreate},
-				Resource: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
-			},
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrValidationFailed)
-
-				var detailedErr *DetailedError
-				require.ErrorAs(t, err, &detailedErr)
-				require.Equal(t, "unknown resource type", detailedErr.Message)
-				require.Equal(t, model.ResourceTypeSpace, detailedErr.Value)
-			},
-		},
-		{
-			name: "unknown action returns validation error",
-			req: model.CheckDecisionRequest{
-				Subject:  subject,
-				Action:   model.Action{Name: model.ActionName("unknown")},
-				Resource: model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-			},
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrValidationFailed)
-
-				var detailedErr *DetailedError
-				require.ErrorAs(t, err, &detailedErr)
-				require.Equal(t, "unknown action", detailedErr.Message)
-				require.Equal(t, model.ActionName("unknown"), detailedErr.Value)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := toOpenFGACheckDecisionRequest(tt.req)
-			tt.wantErr(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestRelationFromAction(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		action       model.ActionName
-		resourceType model.ResourceType
-		want         model.ActionType
-		wantErr      require.ErrorAssertionFunc
-	}{
-		{
-			name:         "read",
-			action:       model.ActionNameRead,
-			resourceType: model.ResourceTypeNote,
-			want:         model.ActionTypeRead,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "update",
-			action:       model.ActionNameUpdate,
-			resourceType: model.ResourceTypeNote,
-			want:         model.ActionTypeCanUpdate,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "delete",
-			action:       model.ActionNameDelete,
-			resourceType: model.ResourceTypeNote,
-			want:         model.ActionTypeCanDelete,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "stop reminder",
-			action:       model.ActionNameStopReminder,
-			resourceType: model.ResourceTypeReminder,
-			want:         model.ActionTypeCanStopReminder,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "create note",
-			action:       model.ActionNameCreate,
-			resourceType: model.ResourceTypeNote,
-			want:         model.ActionTypeCreateNote,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "create reminder",
-			action:       model.ActionNameCreate,
-			resourceType: model.ResourceTypeReminder,
-			want:         model.ActionTypeCreateReminder,
-			wantErr:      require.NoError,
-		},
-		{
-			name:         "create space returns unknown resource type",
-			action:       model.ActionNameCreate,
-			resourceType: model.ResourceTypeSpace,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrValidationFailed)
-
-				var detailedErr *DetailedError
-				require.ErrorAs(t, err, &detailedErr)
-				require.Equal(t, "unknown resource type", detailedErr.Message)
-				require.Equal(t, model.ResourceTypeSpace, detailedErr.Value)
-			},
-		},
-		{
-			name:         "unknown action returns validation error",
-			action:       model.ActionName("unknown"),
-			resourceType: model.ResourceTypeNote,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrValidationFailed)
-
-				var detailedErr *DetailedError
-				require.ErrorAs(t, err, &detailedErr)
-				require.Equal(t, "unknown action", detailedErr.Message)
-				require.Equal(t, model.ActionName("unknown"), detailedErr.Value)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := relationFromAction(tt.action, tt.resourceType)
-			tt.wantErr(t, err)
-			require.Equal(t, tt.want, got)
 		})
 	}
 }

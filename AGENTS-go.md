@@ -3,7 +3,7 @@
 Перед изменением Go-кода прочитай:
 - `docs/codestyle/go-engineering-guide.md` — архитектура, идиомы Go, ошибки, БД, конкурентность и надёжность.
 - `docs/codestyle/testing-guidelines.md` — правила тестов и обязательные проверки.
-- `docs/codestyle/architecture-examples.md` — примеры выбора решений. Примеры условные; не копируй их без адаптации к API проекта.
+- `docs/codestyle/go-architecture-examples.md` — примеры выбора решений. Примеры условные; не копируй их без адаптации к API проекта.
 
 ## Приоритеты
 

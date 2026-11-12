@@ -256,19 +256,3 @@ type Action struct {
 	Name       ActionName     `json:"name"`
 	Attributes map[string]any `json:"attributes"`
 }
-
-type CheckDecisionRequest struct {
-	RequestID uuid.UUID `json:"request_id"`
-	Subject   Subject   `json:"subject"`
-	UserID    uuid.UUID `json:"user_id"`
-	Action    Action    `json:"action"`
-	Resource  Resource  `json:"resource"`
-	Context   Context   `json:"context"`
-}
-
-type CheckDecisionResponse struct {
-	RequestID  uuid.UUID `json:"request_id"`
-	DecisionID uuid.UUID `json:"decision_id"`
-	Result     bool      `json:"result"`
-	Meta       Meta      `json:"meta"`
-}

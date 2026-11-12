@@ -4,6 +4,7 @@ import (
 	"auth-service/internal/config"
 	"auth-service/internal/server"
 	"auth-service/internal/service/auth"
+	"auth-service/internal/service/decision"
 	"auth-service/internal/service/enforcer"
 	"auth-service/internal/service/fga"
 	"auth-service/internal/service/politics"
@@ -126,12 +127,13 @@ func initNotesHandler(politicsSvc *politics.Service, userSvc *user.Service) *han
 	)
 }
 
-func initResourcesHandler(resourceSvc *fga.Client) *handlerV0.ResourceHandler {
+func initResourcesHandler(resourceSvc *fga.Client, decisions *decision.Service) *handlerV0.ResourceHandler {
 	logrus.Info("initializing resources handler")
 
 	return start(
 		handlerV0.NewResourceHandler(
 			handlerV0.WithResourceService(resourceSvc),
+			handlerV0.WithDecisionService(decisions),
 		),
 	)
 }
@@ -278,6 +280,7 @@ func initFGAClient(cfg config.OpenFGA, auditor *audit.Auditor, userRepo *repo.Re
 		fga.WithAPIURL(cfg.APIURL),
 		fga.WithAuthorizationModel(cfg.AuthorizationModel),
 		fga.WithStoreID(cfg.StoreID),
+		fga.WithModelID(cfg.ModelID),
 		fga.WithStoreName(cfg.StoreName),
 		fga.WithApplyModelOnStart(cfg.ApplyModelOnStart),
 		fga.WithAuditor(auditor),
