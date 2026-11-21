@@ -72,3 +72,22 @@ jobs:
           if [ -f testkit/Makefile ]; then
             make integration-down
           fi
+
+  components:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.CI_GITHUB_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y python3-yaml
+      - name: Проверить CLI, политику, запросы OpenFGA и историю PostgreSQL
+        run: make test-components
