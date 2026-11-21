@@ -1621,7 +1621,7 @@ func TestUpdateResource(t *testing.T) {
 				return stub
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.ErrorIs(t, err, ErrResounceAlreadyExistsOrNotFound)
+				require.ErrorIs(t, err, ErrResourceAlreadyExistsOrNotFound)
 			},
 			checkWrite: true,
 		},
@@ -1668,6 +1668,7 @@ func TestUpdateResource(t *testing.T) {
 
 			got, err := client.UpdateResource(t.Context(), tt.req)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.want, got)
 
 			if !tt.checkWrite {

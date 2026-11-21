@@ -351,9 +351,9 @@ func (c *Client) writeAuthorizationModel(ctx context.Context, body openfga.Write
 	return data, nil
 }
 
-// ErrResounceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
+// ErrResourceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
 var (
-	ErrResounceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
+	ErrResourceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
 	ErrUserNotFound                    = errors.New("user not found")
 )
 
@@ -363,7 +363,7 @@ const (
 )
 
 // UpdateResource обновляет ресурс в OpenFGA.
-// Если создаваемый ресурс уже существует или удаляемый ресурс не найден, возвращает ошибку ErrResounceAlreadyExistsOrNotFound.
+// Если создаваемый ресурс уже существует или удаляемый ресурс не найден, возвращает ошибку ErrResourceAlreadyExistsOrNotFound.
 //
 //nolint:funlen // много строк из-за аудита
 func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceRequest) (model.UpdateResourceResponse, error) {
@@ -437,7 +437,7 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 				event.Append(audit.Level(audit.ErrLevelError))
 
 				return model.UpdateResourceResponse{}, &DetailedError{
-					Err:   ErrResounceAlreadyExistsOrNotFound,
+					Err:   ErrResourceAlreadyExistsOrNotFound,
 					Value: nil,
 				}
 			}
