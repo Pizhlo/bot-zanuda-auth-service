@@ -7,7 +7,8 @@ const (
 	DefaultOpenFGARequestTimeout = 5 * time.Second
 	// DefaultAuditDeliveryTimeout ограничивает задержку ответа при недоступном брокере.
 	DefaultAuditDeliveryTimeout = time.Second
-
+	// DefaultMigrationTimeout — общий бюджет операторского запуска space-types.
+	DefaultMigrationTimeout = 10 * time.Minute
 )
 
 func (c *Config) setDefaults() {

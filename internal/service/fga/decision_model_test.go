@@ -57,21 +57,42 @@ func TestEnsureDecisionModel(t *testing.T) {
 		api.EXPECT().ReadAuthorizationModel(gomock.Any()).Return(stub)
 	}
 
-	for _, tt := range []struct {
+	tests := []struct {
 		name     string
 		response *sdk.ClientReadAuthorizationModelResponse
 		err      error
 		wantErr  require.ErrorAssertionFunc
 		expect   func(*mocks.MockSdkClient, *modelReadStub)
 	}{
-		{"strict", modelResponse(t, fgamodel.Strict), nil, require.NoError, expectRead},
-		{"different model", modelResponse(t, "model\n  schema 1.1\ntype user"), nil, requireModelError("does not match"), expectRead},
-		{"unavailable", nil, context.DeadlineExceeded, func(t require.TestingT, err error, _ ...any) {
-			require.ErrorContains(t, err, "verify decision model: read pinned decision model")
-			require.ErrorIs(t, err, context.DeadlineExceeded)
-		}, expectRead},
-		{"empty", nil, nil, requireModelError("is empty"), expectRead},
-	} {
+		{
+			name:     "strict",
+			response: modelResponse(t, fgamodel.Strict),
+			wantErr:  require.NoError,
+			expect:   expectRead,
+		},
+		{
+			name:     "transition",
+			response: modelResponse(t, fgamodel.Transition),
+			wantErr:  requireModelError("does not match"),
+			expect:   expectRead,
+		},
+		{
+			name: "unavailable",
+			err:  context.DeadlineExceeded,
+			wantErr: func(t require.TestingT, err error, _ ...any) {
+				require.ErrorContains(t, err, "verify decision model: read pinned decision model")
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			},
+			expect: expectRead,
+		},
+		{
+			name:    "empty",
+			wantErr: requireModelError("is empty"),
+			expect:  expectRead,
+		},
+	}
+
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 

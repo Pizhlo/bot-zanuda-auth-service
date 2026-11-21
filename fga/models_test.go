@@ -13,11 +13,19 @@ import (
 func TestModelsParse(t *testing.T) {
 	t.Parallel()
 
-	for name, dsl := range map[string]string{"strict": Strict} {
-		t.Run(name, func(t *testing.T) {
+	tests := []struct {
+		name string
+		dsl  string
+	}{
+		{name: "strict", dsl: Strict},
+		{name: "transition", dsl: Transition},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			model, err := transformer.TransformDSLToProto(dsl)
+			model, err := transformer.TransformDSLToProto(tt.dsl)
 			require.NoError(t, err)
 
 			for _, pair := range []struct {
