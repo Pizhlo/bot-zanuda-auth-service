@@ -1,15 +1,35 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 )
 
 //nolint:funlen // длинный тест
 func TestLoadConfig(t *testing.T) {
 	t.Parallel()
+
+	badTimeoutFile := func(configure func(*Config)) string {
+		t.Helper()
+
+		template, err := os.ReadFile("testdata/valid.yaml")
+		require.NoError(t, err)
+
+		var cfg Config
+		require.NoError(t, yaml.Unmarshal(template, &cfg))
+		configure(&cfg)
+		data, err := yaml.Marshal(cfg)
+		require.NoError(t, err)
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, data, 0600))
+
+		return path
+	}
 
 	tests := []struct {
 		name       string
@@ -17,6 +37,9 @@ func TestLoadConfig(t *testing.T) {
 		want       *Config
 		wantErr    require.ErrorAssertionFunc
 	}{
+		{name: "negative OpenFGA timeout", configFile: badTimeoutFile(func(c *Config) { c.OpenFGA.RequestTimeout = -time.Second }), wantErr: func(t require.TestingT, err error, _ ...any) { require.ErrorContains(t, err, "RequestTimeout") }},
+		{name: "negative audit timeout", configFile: badTimeoutFile(func(c *Config) { c.Audit.DeliveryTimeout = -time.Second }), wantErr: func(t require.TestingT, err error, _ ...any) { require.ErrorContains(t, err, "DeliveryTimeout") }},
+
 		{
 			name:       "valid config",
 			configFile: "testdata/valid.yaml",
@@ -27,8 +50,9 @@ func TestLoadConfig(t *testing.T) {
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
 				Audit: AuditConfig{
-					BrokerEnabled: true,
-					Topic:         "errors.auth-service",
+					DeliveryTimeout: DefaultAuditDeliveryTimeout,
+					BrokerEnabled:   true,
+					Topic:           "errors.auth-service",
 					Kinds: struct {
 						Include []string `yaml:"include"`
 						Exclude []string `yaml:"exclude"`
@@ -71,6 +95,7 @@ func TestLoadConfig(t *testing.T) {
 					ReadTimeout:   5 * time.Second,
 				},
 				OpenFGA: OpenFGA{
+					RequestTimeout:     DefaultOpenFGARequestTimeout,
 					APIURL:             "http://localhost:1234",
 					AuthorizationModel: "testpath/testfile.fga",
 					StoreName:          "notes-bot",
@@ -99,14 +124,16 @@ func TestLoadConfig(t *testing.T) {
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
 				OpenFGA: OpenFGA{
+					RequestTimeout:     DefaultOpenFGARequestTimeout,
 					APIURL:             "http://localhost:1234",
 					AuthorizationModel: "testpath/testfile.fga",
 					StoreName:          "notes-bot",
 					ApplyModelOnStart:  false,
 				},
 				Audit: AuditConfig{
-					BrokerEnabled: false,
-					Topic:         "errors.auth-service",
+					DeliveryTimeout: DefaultAuditDeliveryTimeout,
+					BrokerEnabled:   false,
+					Topic:           "errors.auth-service",
 					Kinds: struct {
 						Include []string `yaml:"include"`
 						Exclude []string `yaml:"exclude"`
@@ -171,14 +198,16 @@ func TestLoadConfig(t *testing.T) {
 					ShutdownTimeout: 100 * time.Millisecond,
 				},
 				OpenFGA: OpenFGA{
+					RequestTimeout:     DefaultOpenFGARequestTimeout,
 					APIURL:             "http://localhost:1234",
 					AuthorizationModel: "testpath/testfile.fga",
 					StoreName:          "notes-bot",
 					ApplyModelOnStart:  false,
 				},
 				Audit: AuditConfig{
-					BrokerEnabled: true,
-					Topic:         "errors.auth-service",
+					DeliveryTimeout: DefaultAuditDeliveryTimeout,
+					BrokerEnabled:   true,
+					Topic:           "errors.auth-service",
 					Kinds: struct {
 						Include []string `yaml:"include"`
 						Exclude []string `yaml:"exclude"`
@@ -294,9 +323,7 @@ func TestLoadConfig(t *testing.T) {
 			cfg, err := LoadConfig(tt.configFile)
 			tt.wantErr(t, err)
 
-			if tt.want != nil {
-				require.Equal(t, tt.want, cfg)
-			}
+			require.Equal(t, tt.want, cfg)
 		})
 	}
 }

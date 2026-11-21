@@ -2,6 +2,7 @@
 package fga
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"auth-service/internal/model"
 	"auth-service/internal/service/fga/mocks"
 	"auth-service/internal/storage"
+	"auth-service/pkg/audit"
 	"auth-service/pkg/audit/testaudit"
 
 	openfga "github.com/openfga/go-sdk"
@@ -215,7 +217,6 @@ func (s *writeRequestStub) GetContext() context.Context {
 func TestNewClient(t *testing.T) {
 	t.Parallel()
 
-	auditor := testaudit.NewAuditor(t)
 	userRepo := mocks.NewMockuserRepo(gomock.NewController(t))
 
 	tests := []struct {
@@ -232,7 +233,6 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
-				WithAuditor(auditor),
 				WithUserRepo(userRepo),
 			},
 			want: &Client{
@@ -241,8 +241,8 @@ func TestNewClient(t *testing.T) {
 				storeID:            "test",
 				storeName:          "test",
 				applyModelOnStart:  true,
-				auditor:            auditor,
-				userRepo:           userRepo,
+
+				userRepo: userRepo,
 			},
 			wantErr: require.NoError,
 		},
@@ -253,7 +253,6 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
-				WithAuditor(auditor),
 				WithUserRepo(userRepo),
 			},
 			want: nil,
@@ -269,7 +268,6 @@ func TestNewClient(t *testing.T) {
 				WithStoreID("test"),
 				WithStoreName("test"),
 				WithApplyModelOnStart(true),
-				WithAuditor(auditor),
 				WithUserRepo(userRepo),
 			},
 			want: nil,
@@ -284,7 +282,6 @@ func TestNewClient(t *testing.T) {
 				WithAuthorizationModel("test"),
 				WithAPIURL("http://localhost:8080"),
 				WithApplyModelOnStart(true),
-				WithAuditor(auditor),
 				WithUserRepo(userRepo),
 			},
 			want: nil,
@@ -298,7 +295,6 @@ func TestNewClient(t *testing.T) {
 			opts: []option{
 				WithAuthorizationModel("test"),
 				WithAPIURL("http://localhost:8080"),
-				WithAuditor(auditor),
 				WithUserRepo(userRepo),
 			},
 			want: nil,
@@ -307,21 +303,7 @@ func TestNewClient(t *testing.T) {
 				require.ErrorContains(t, err, "store id or store name is required")
 			},
 		},
-		{
-			name: "negative case: auditor is required",
-			opts: []option{
-				WithAuthorizationModel("test"),
-				WithAPIURL("http://localhost:8080"),
-				WithStoreID("test"),
-				WithStoreName("test"),
-				WithUserRepo(userRepo),
-			},
-			want: nil,
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "auditor is required")
-			},
-		},
+
 		{
 			name: "negative case: user repo is required",
 			opts: []option{
@@ -329,7 +311,6 @@ func TestNewClient(t *testing.T) {
 				WithAPIURL("http://localhost:8080"),
 				WithStoreID("test"),
 				WithStoreName("test"),
-				WithAuditor(auditor),
 			},
 			want: nil,
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
@@ -454,10 +435,11 @@ func TestFindStoreByName(t *testing.T) {
 			userRepo := mocks.NewMockuserRepo(ctrl)
 			stub := tt.setupMocks(t, mockClient)
 
-			client := &Client{fgaClient: mockClient, auditor: testaudit.NewAuditor(t), userRepo: userRepo}
+			client := &Client{fgaClient: mockClient, userRepo: userRepo}
 
 			got, err := client.findStoreByName(t.Context(), storeName)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.want, got)
 
 			require.NotNil(t, stub.options)
@@ -558,12 +540,13 @@ func TestCreateStore(t *testing.T) {
 			client := &Client{
 				fgaClient: mockClient,
 				storeName: storeName,
-				auditor:   testaudit.NewAuditor(t),
-				userRepo:  userRepo,
+
+				userRepo: userRepo,
 			}
 
 			err := client.createStore(t.Context())
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.wantStoreID, client.storeID)
 
 			require.NotNil(t, stub.body)
@@ -1371,10 +1354,11 @@ func TestWriteAuthorizationModel(t *testing.T) {
 			mockClient := mocks.NewMockSdkClient(ctrl)
 			stub := tt.setupMocks(t, mockClient)
 
-			client := &Client{fgaClient: mockClient, auditor: testaudit.NewAuditor(t)}
+			client := &Client{fgaClient: mockClient}
 
 			got, err := client.writeAuthorizationModel(t.Context(), body)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.want, got)
 
 			require.NotNil(t, stub.body)
@@ -1383,33 +1367,6 @@ func TestWriteAuthorizationModel(t *testing.T) {
 			require.Equal(t, "user", stub.body.TypeDefinitions[0].Type)
 		})
 	}
-}
-
-func writeValidationError(t *testing.T, code openfga.ErrorCode) error {
-	t.Helper()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-
-		resp := openfga.NewValidationErrorMessageResponse()
-		resp.SetCode(code)
-		resp.SetMessage("validation failed")
-
-		require.NoError(t, json.NewEncoder(w).Encode(resp))
-	}))
-	t.Cleanup(server.Close)
-
-	sdkClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
-		ApiUrl: server.URL,
-	})
-	require.NoError(t, err)
-	require.NoError(t, sdkClient.SetStoreId("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
-
-	_, err = sdkClient.Write(t.Context()).Body(openFGAClient.ClientWriteRequest{}).Execute()
-	require.Error(t, err)
-
-	return err
 }
 
 func TestUpdateResource(t *testing.T) {
@@ -1441,17 +1398,76 @@ func TestUpdateResource(t *testing.T) {
 		},
 	}
 
+	wantNoteWrite := func(t *testing.T, stub *writeRequestStub) {
+		t.Helper()
+
+		require.NotNil(t, stub)
+		require.NotNil(t, stub.body)
+		require.Equal(t, []openFGAClient.ClientTupleKey{
+			{
+				User:     ownerObject,
+				Relation: "owner",
+				Object:   noteObject,
+			},
+			{
+				User:     spaceObject,
+				Relation: "space",
+				Object:   noteObject,
+			},
+		}, stub.body.Writes)
+		require.Nil(t, stub.body.Deletes)
+		require.NotNil(t, stub.options)
+		require.NotNil(t, stub.options.AuthorizationModelId)
+		require.Equal(t, modelID, *stub.options.AuthorizationModelId)
+	}
+	skipWriteCheck := func(*testing.T, *writeRequestStub) {}
+
+	startAudit := func(t *testing.T, source *resourceAuditCapture) (context.Context, func(error)) {
+		t.Helper()
+		ctx, attempt, err := audit.Begin(t.Context(), source, OperationUpdateResource, audit.StageReceiveRequest.String())
+		require.NoError(t, err)
+
+		return ctx, func(finalErr error) { attempt.Finish(ctx, &finalErr) }
+	}
+	noAuditCheck := func(*testing.T, audit.EventContext) {}
+	wantIdentity := func(t *testing.T, fields audit.EventContext) {
+		t.Helper()
+		require.Equal(t, ownerID.String(), fields[audit.KeyUserID])
+		require.Equal(t, "user:"+ownerID.String(), fields[audit.KeySubject])
+	}
+	noIdentity := func(t *testing.T, fields audit.EventContext) {
+		t.Helper()
+		require.NotContains(t, fields, audit.KeyUserID)
+		require.NotContains(t, fields, audit.KeySubject)
+	}
 	tests := []struct {
 		name       string
+		startAudit func(*testing.T, *resourceAuditCapture) (context.Context, func(error))
+		wantAudit  func(*testing.T, audit.EventContext)
+		wantLog    []string
 		req        model.UpdateResourceRequest
 		setupMocks func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub
 		want       model.UpdateResourceResponse
 		wantErr    require.ErrorAssertionFunc
-		checkWrite bool
+		wantWrite  func(*testing.T, *writeRequestStub)
 	}{
 		{
-			name: "positive case: create note",
+			name: "requires audit before user lookup",
 			req:  createNoteRequest,
+			startAudit: func(t *testing.T, _ *resourceAuditCapture) (context.Context, func(error)) {
+				t.Helper()
+				return t.Context(), func(error) {}
+			},
+			setupMocks: func(*testing.T, *mocks.MockSdkClient, *mocks.MockuserRepo) *writeRequestStub { return nil },
+			wantWrite:  skipWriteCheck,
+			wantAudit:  noIdentity,
+			wantErr:    func(t require.TestingT, err error, _ ...any) { require.ErrorIs(t, err, audit.ErrMissingAttempt) },
+		},
+		{
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "positive case: create note",
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
@@ -1479,12 +1495,15 @@ func TestUpdateResource(t *testing.T) {
 					AuthModelID: modelID,
 				},
 			},
-			wantErr:    require.NoError,
-			checkWrite: true,
+			wantErr:   require.NoError,
+			wantWrite: wantNoteWrite,
 		},
 		{
-			name: "error case: user not found",
-			req:  createNoteRequest,
+			startAudit: startAudit,
+			wantAudit:  noIdentity,
+			name:       "error case: user not found",
+			wantLog:    []string{"level=error", "cause=\"not found\""},
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
@@ -1496,10 +1515,13 @@ func TestUpdateResource(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.ErrorIs(t, err, ErrUserNotFound)
 			},
+			wantWrite: skipWriteCheck,
 		},
 		{
-			name: "error case: get user id by telegram id fails",
-			req:  createNoteRequest,
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: get user id by telegram id fails",
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
@@ -1517,9 +1539,13 @@ func TestUpdateResource(t *testing.T) {
 				require.ErrorAs(t, err, &detailed)
 				require.Equal(t, createNoteRequest.TelegramID, detailed.Value)
 			},
+			wantWrite: skipWriteCheck,
 		},
 		{
-			name: "error case: validate request fails",
+			startAudit: startAudit,
+			wantAudit:  wantIdentity,
+			name:       "error case: validate request fails",
+			wantLog:    []string{"level=debug", "cause=\"owner is required\""},
 			req: model.UpdateResourceRequest{
 				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
 				Operation:  model.OperationCreate,
@@ -1533,21 +1559,27 @@ func TestUpdateResource(t *testing.T) {
 			},
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
-				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
+
+				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(ownerID, nil)
 
 				return nil
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.ErrorIs(t, err, ErrOwnerRequired)
 			},
+			wantWrite: skipWriteCheck,
 		},
 		{
-			name: "error case: invalid resource type",
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: invalid resource type",
+			wantLog:    []string{"level=debug", "cause=\"invalid resource type\""},
 			req: model.UpdateResourceRequest{
 				Resource: model.Resource{ID: noteID, Type: "invalid"},
 			},
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
+
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return nil
@@ -1556,9 +1588,12 @@ func TestUpdateResource(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "invalid resource type: invalid")
 			},
+			wantWrite: skipWriteCheck,
 		},
 		{
-			name: "error case: convert request fails",
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: convert request fails",
 			req: model.UpdateResourceRequest{
 				Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
 				Operation:  model.OperationUpdate,
@@ -1573,6 +1608,7 @@ func TestUpdateResource(t *testing.T) {
 			},
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
+
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
 
 				return nil
@@ -1582,10 +1618,13 @@ func TestUpdateResource(t *testing.T) {
 				require.ErrorContains(t, err, "convert request to openfga tuples")
 				require.ErrorContains(t, err, "unknown operation")
 			},
+			wantWrite: skipWriteCheck,
 		},
 		{
-			name: "error case: write tuples fails",
-			req:  createNoteRequest,
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: write tuples fails",
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
@@ -1603,17 +1642,20 @@ func TestUpdateResource(t *testing.T) {
 				require.ErrorContains(t, err, "write tuples to openfga")
 				require.ErrorContains(t, err, "write failed")
 			},
-			checkWrite: true,
+			wantWrite: wantNoteWrite,
 		},
 		{
-			name: "error case: resource already exists or not found",
-			req:  createNoteRequest,
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: resource already exists or not found",
+			wantLog:    []string{"level=error", "write_failed_due_to_invalid_input"},
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
 				stub := &writeRequestStub{
 					ctx: t.Context(),
-					err: writeValidationError(t, openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT),
+					err: writeAPIError(t, http.StatusBadRequest, string(openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT)),
 				}
 				client.EXPECT().Write(gomock.Any()).Return(stub)
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
@@ -1623,17 +1665,19 @@ func TestUpdateResource(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.ErrorIs(t, err, ErrResourceAlreadyExistsOrNotFound)
 			},
-			checkWrite: true,
+			wantWrite: wantNoteWrite,
 		},
 		{
-			name: "error case: fga validation error with other code",
-			req:  createNoteRequest,
+			startAudit: startAudit,
+			wantAudit:  noAuditCheck,
+			name:       "error case: fga validation error with other code",
+			req:        createNoteRequest,
 			setupMocks: func(t *testing.T, client *mocks.MockSdkClient, userRepo *mocks.MockuserRepo) *writeRequestStub {
 				t.Helper()
 
 				stub := &writeRequestStub{
 					ctx: t.Context(),
-					err: writeValidationError(t, openfga.ERRORCODE_VALIDATION_ERROR),
+					err: writeAPIError(t, http.StatusBadRequest, string(openfga.ERRORCODE_VALIDATION_ERROR)),
 				}
 				client.EXPECT().Write(gomock.Any()).Return(stub)
 				userRepo.EXPECT().GetUserIDByTelegramID(gomock.Any(), strconv.Itoa(createNoteRequest.TelegramID)).Return(uuid.New(), nil)
@@ -1644,7 +1688,7 @@ func TestUpdateResource(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "write tuples to openfga")
 			},
-			checkWrite: true,
+			wantWrite: wantNoteWrite,
 		},
 	}
 
@@ -1662,37 +1706,29 @@ func TestUpdateResource(t *testing.T) {
 			client := &Client{
 				fgaClient: mockClient,
 				modelID:   modelID,
-				auditor:   testaudit.NewAuditor(t),
 				userRepo:  userRepo,
 			}
 
-			got, err := client.UpdateResource(t.Context(), tt.req)
-			tt.wantErr(t, err)
+			var output bytes.Buffer
 
-			require.Equal(t, tt.want, got)
+			opened, openErr := audit.NewAuditor(audit.WithOutput(&output)).Create(t.Context())
+			require.NoError(t, openErr)
 
-			if !tt.checkWrite {
-				return
+			source := &resourceAuditCapture{Event: opened, fields: audit.EventContext{}}
+			ctx, finish := tt.startAudit(t, source)
+
+			got, err := client.UpdateResource(ctx, tt.req)
+			finish(err)
+
+			for _, field := range tt.wantLog {
+				require.Contains(t, output.String(), field)
 			}
 
-			require.NotNil(t, stub)
-			require.NotNil(t, stub.body)
-			require.Equal(t, []openFGAClient.ClientTupleKey{
-				{
-					User:     ownerObject,
-					Relation: "owner",
-					Object:   noteObject,
-				},
-				{
-					User:     spaceObject,
-					Relation: "space",
-					Object:   noteObject,
-				},
-			}, stub.body.Writes)
-			require.Nil(t, stub.body.Deletes)
-			require.NotNil(t, stub.options)
-			require.NotNil(t, stub.options.AuthorizationModelId)
-			require.Equal(t, modelID, *stub.options.AuthorizationModelId)
+			tt.wantAudit(t, source.fields)
+			tt.wantErr(t, err)
+			require.Equal(t, tt.want, got)
+
+			tt.wantWrite(t, stub)
 		})
 	}
 }
@@ -2718,4 +2754,94 @@ func TestCheckEventType(t *testing.T) {
 			require.ErrorIs(t, got.Err, tt.want.Err)
 		})
 	}
+}
+
+func TestTupleWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	duplicate := writeAPIError(t, http.StatusBadRequest, string(openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT))
+	aborted := writeAPIError(t, http.StatusConflict, string(openfga.INTERNALERRORCODE_ABORTED))
+	unknownConflict := writeAPIError(t, http.StatusConflict, "unrecognized")
+	invalid := writeAPIError(t, http.StatusBadRequest, string(openfga.ERRORCODE_VALIDATION_ERROR))
+
+	wantConflict := func(t *testing.T, err error) {
+		t.Helper()
+		require.ErrorIs(t, err, ErrResourceAlreadyExistsOrNotFound)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		cause error
+		want  func(*testing.T, error)
+	}{
+		{"duplicate tuple", duplicate, wantConflict},
+		{"aborted transaction", fmt.Errorf("SDK write: %w", aborted), wantConflict},
+		{"other conflict", unknownConflict, func(t *testing.T, err error) {
+			t.Helper()
+
+			var sdkErr openfga.FgaApiError
+			require.ErrorAs(t, err, &sdkErr)
+			require.Equal(t, "unrecognized", sdkErr.ResponseCode())
+		}},
+		{"other validation error", invalid, func(t *testing.T, err error) {
+			t.Helper()
+
+			var sdkErr openfga.FgaApiValidationError
+			require.ErrorAs(t, err, &sdkErr)
+			require.Equal(t, openfga.ERRORCODE_VALIDATION_ERROR, sdkErr.ResponseCode())
+		}},
+		{"transport error", context.DeadlineExceeded, func(t *testing.T, err error) {
+			t.Helper()
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, attempt, err := audit.Begin(t.Context(), testaudit.NewAuditor(t), OperationUpdateResource, stageWriteTuples)
+			require.NoError(t, err)
+
+			got := tupleWriteFailure(attempt, tc.cause)
+
+			var detail *DetailedError
+			require.ErrorAs(t, got, &detail)
+			tc.want(t, got)
+		})
+	}
+}
+
+type resourceAuditCapture struct {
+	audit.Event
+	fields audit.EventContext
+}
+
+func (s *resourceAuditCapture) Create(context.Context) (audit.Event, error) { return s, nil }
+
+func (s *resourceAuditCapture) AppendContext(fields audit.EventContext) {
+	for k, v := range fields {
+		s.fields[k] = v
+	}
+}
+
+func writeAPIError(t *testing.T, status int, code string) error {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": "write failed"})
+	}))
+	t.Cleanup(server.Close)
+
+	sdkClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
+		ApiUrl: server.URL,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, sdkClient.SetStoreId("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
+
+	_, err = sdkClient.Write(t.Context()).Body(openFGAClient.ClientWriteRequest{}).Execute()
+	require.Error(t, err)
+
+	return err
 }

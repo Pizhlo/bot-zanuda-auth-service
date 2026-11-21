@@ -95,30 +95,30 @@ func main() {
 
 	auditor := initAuditor(config.Audit, sender)
 
-	fga := initFGAClient(config.OpenFGA, auditor, repo)
+	fga := initFGAClient(config.OpenFGA, repo)
 	if err := fga.Connect(notifyCtx); err != nil {
 		logrus.WithError(err).Fatal("failed to connect to fga")
 	}
 
 	defer butler.stop(notifyCtx, fga)
 
-	authSvc := initAuthService(vaultClient, config.Auth, repo, auditor)
+	authSvc := initAuthService(vaultClient, config.Auth, repo)
 
 	spaceAccessChecker := initSpaceAccessChecker(repo)
 	notePermissionResolver := initNotePermissionResolver(repo)
 
-	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker, auditor)
+	politicsSvc := initPoliticsService(repo, notePermissionResolver, spaceAccessChecker)
 
 	redis := initRedisStorage(notifyCtx, config.Redis)
 	defer butler.stop(notifyCtx, redis)
 
-	userSvc := initUserService(repo, redis, config.Auth, auditor)
+	userSvc := initUserService(repo, redis, config.Auth)
 
 	resourcesHandler := initResourcesHandler(fga)
 	authHandler := initAuthHandler(authSvc)
 	notesHandler := initNotesHandler(politicsSvc, userSvc)
 	handlerV0 := initHandlerV0(butler.BuildInfo, notesHandler, authHandler, resourcesHandler)
-	middlewareHandler := initMiddlewareHandler(authSvc)
+	middlewareHandler := initMiddlewareHandler(authSvc, auditor)
 
 	server := initServer(handlerV0, middlewareHandler, config.Server)
 

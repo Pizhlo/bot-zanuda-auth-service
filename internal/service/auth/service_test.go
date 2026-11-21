@@ -3,7 +3,6 @@ package auth
 import (
 	"auth-service/internal/model"
 	"auth-service/internal/service/auth/mocks"
-	"auth-service/pkg/audit/testaudit"
 	"errors"
 	"testing"
 	"time"
@@ -15,13 +14,12 @@ import (
 )
 
 //nolint:funlen // длинный тест - это ок
-func TestNewService(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
 
 	type mockMocks struct {
 		mockVaultClient *mocks.MockvaultClient
 		mockStorage     *mocks.Mockstorage
-		mockAuditor     auditor
 	}
 
 	tests := []struct {
@@ -41,7 +39,6 @@ func TestNewService(t *testing.T) {
 					WithSecretKey([]byte("abc")),
 					WithIssuer("test"),
 					WithTokenDuration(1 * time.Second),
-					WithAuditor(m.mockAuditor),
 					WithStorage(m.mockStorage),
 				}
 			},
@@ -55,7 +52,6 @@ func TestNewService(t *testing.T) {
 					tokenDuration:     1 * time.Second,
 					storage:           m.mockStorage,
 					issuer:            "test",
-					auditor:           m.mockAuditor,
 				}
 			},
 			wantErr: require.NoError,
@@ -71,7 +67,6 @@ func TestNewService(t *testing.T) {
 					WithIssuer("test"),
 					WithTokenDuration(1 * time.Second),
 					WithStorage(m.mockStorage),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -95,7 +90,6 @@ func TestNewService(t *testing.T) {
 					WithIssuer("test"),
 					WithTokenDuration(1 * time.Second),
 					WithStorage(m.mockStorage),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -119,7 +113,6 @@ func TestNewService(t *testing.T) {
 					WithIssuer("test"),
 					WithTokenDuration(1 * time.Second),
 					WithStorage(m.mockStorage),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -143,7 +136,6 @@ func TestNewService(t *testing.T) {
 					WithVaultClient(m.mockVaultClient),
 					WithTokenDuration(1 * time.Second),
 					WithStorage(m.mockStorage),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -167,7 +159,6 @@ func TestNewService(t *testing.T) {
 					WithVaultClient(m.mockVaultClient),
 					WithIssuer("test"),
 					WithStorage(m.mockStorage),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -191,7 +182,6 @@ func TestNewService(t *testing.T) {
 					WithVaultClient(m.mockVaultClient),
 					WithIssuer("test"),
 					WithTokenDuration(1 * time.Second),
-					WithAuditor(m.mockAuditor),
 				}
 			},
 			createWant: func(t *testing.T, m *mockMocks) *Service {
@@ -202,30 +192,6 @@ func TestNewService(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "storage is required")
-			},
-		},
-		{
-			name: "error case: auditor is required",
-			createOpts: func(t *testing.T, m *mockMocks) []option {
-				t.Helper()
-
-				return []option{
-					WithUpdateKeyInterval(1 * time.Second),
-					WithVaultClient(m.mockVaultClient),
-					WithSecretKey([]byte("abc")),
-					WithIssuer("test"),
-					WithTokenDuration(1 * time.Second),
-					WithStorage(m.mockStorage),
-				}
-			},
-			createWant: func(t *testing.T, m *mockMocks) *Service {
-				t.Helper()
-
-				return nil
-			},
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "auditor is required")
 			},
 		},
 	}
@@ -240,7 +206,6 @@ func TestNewService(t *testing.T) {
 			m := &mockMocks{
 				mockVaultClient: mocks.NewMockvaultClient(ctrl),
 				mockStorage:     mocks.NewMockstorage(ctrl),
-				mockAuditor:     testaudit.NewAuditor(t),
 			}
 
 			got, err := New(tt.createOpts(t, m)...)

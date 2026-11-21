@@ -4,6 +4,7 @@ import (
 	"auth-service/internal/model"
 	"auth-service/internal/service"
 	"auth-service/internal/storage"
+	"auth-service/pkg/audit"
 	"context"
 	"errors"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
 )
+
+const stageFilterNotes = "filter_notes"
 
 // NotesHandler хендлер для работы с заметками.
 type NotesHandler struct {
@@ -86,57 +89,85 @@ func NewNotesHandler(opts ...notesHandlerOption) (*NotesHandler, error) {
 //	@Failure		403		{object}	map[string]string	"Нет доступа к запрошенным заметкам"
 //	@Failure		500		{object}	map[string]string	"Внутренняя ошибка сервера"
 //	@Security	BearerAuth
-//	@Router		/auth/notes/filter [post]
+//	@Router		/api/v0/auth/notes/filter [post]
 func (s *NotesHandler) FilterNotes(c echo.Context) error {
-	var req model.FilterNotesRequest
+	ctx := c.Request().Context()
 
-	if err := c.Bind(&req); err != nil {
-		logrus.WithError(err).Error("error binding request")
-		return errResponse(c, http.StatusBadRequest, errors.New("cannot bind request"))
+	attempt := audit.Current(ctx, audit.OperationFilterNotes)
+	if attempt == nil {
+		return errResponse(c, http.StatusInternalServerError, audit.ErrMissingAttempt)
 	}
 
-	if len(req.NoteIDs) == 0 {
-		return errResponse(c, http.StatusBadRequest, errors.New("empty note id list"))
+	attempt.At(audit.StageValidateRequest.String())
+
+	req, err := bindFilterNotes(c)
+	if err != nil {
+		attempt.Fail(audit.ErrCodeValidationFailed, audit.KindValidation, audit.ErrLevelDebug, err.Error(), err)
+		return errResponse(c, http.StatusBadRequest, err)
 	}
 
-	if req.SpaceID == uuid.Nil {
-		return errResponse(c, http.StatusBadRequest, errors.New("empty space id"))
-	}
+	attempt.At(audit.StageVerifySubject.String())
 
-	userID, ok := userIDFromContext(c.Request().Context())
+	userID, ok := userIDFromContext(ctx)
 	if !ok || userID == "" {
+		attempt.Fail(audit.ErrCodeValidationFailed, audit.KindValidation, audit.ErrLevelWarn, "no user in context", nil)
 		return errResponse(c, http.StatusUnauthorized, errors.New("no user in context"))
 	}
 
-	userIDUUID, err := s.userSvc.GetUserIDByTelegramID(c.Request().Context(), userID)
+	userIDUUID, err := s.userSvc.GetUserIDByTelegramID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
+			attempt.Fail(audit.ErrCodeUserNotFound, audit.KindDomain, audit.ErrLevelError, "user not found", storage.ErrNotFound)
 			return errResponse(c, http.StatusUnauthorized, errors.New("user not found"))
 		}
 
 		logrus.WithError(err).Error("error getting user id by telegram id")
+
+		attempt.Fail(audit.ErrCodeServiceUnavailable, audit.KindInfra, audit.ErrLevelError, "internal server error", nil)
 
 		return errResponse(c, http.StatusInternalServerError, errors.New("internal server error"))
 	}
 
 	req.UserID = userIDUUID
 
-	notes, err := s.politicsService.FilterNotes(c.Request().Context(), req)
+	attempt.Context(audit.EventContext{audit.KeyUserID: userIDUUID.String(), audit.KeySpaceID: req.SpaceID.String(), audit.KeyNoteIDs: req.NoteIDs})
+	attempt.At(stageFilterNotes)
+
+	notes, err := s.politicsService.FilterNotes(ctx, req)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotMember) {
+			attempt.Fail(audit.ErrCodePermDeniedSpace, audit.KindDomain, audit.ErrLevelWarn, "User is not a member of the space", service.ErrUserNotMember)
 			return errResponse(c, http.StatusForbidden, err)
 		}
 
 		logrus.WithError(err).Error("error filtering notes")
 
+		attempt.Fail(audit.ErrCodeServiceUnavailable, audit.KindInfra, audit.ErrLevelWarn, "internal server error", nil)
+
 		return errResponse(c, http.StatusInternalServerError, errors.New("internal server error"))
 	}
 
-	resp := model.FilterNotesResponse{
-		Notes: notes,
+	attempt.At(audit.StageWriteResponse.String())
+
+	return c.JSON(http.StatusOK, model.FilterNotesResponse{Notes: notes})
+}
+
+func bindFilterNotes(c echo.Context) (model.FilterNotesRequest, error) {
+	var req model.FilterNotesRequest
+	if err := c.Bind(&req); err != nil {
+		logrus.WithError(err).Error("error binding request")
+		return req, errors.New("cannot bind request")
 	}
 
-	return c.JSON(http.StatusOK, resp)
+	if len(req.NoteIDs) == 0 {
+		return req, errors.New("empty note id list")
+	}
+
+	if req.SpaceID == uuid.Nil {
+		return req, errors.New("empty space id")
+	}
+
+	return req, nil
 }
 
 func userIDFromContext(ctx context.Context) (string, bool) {

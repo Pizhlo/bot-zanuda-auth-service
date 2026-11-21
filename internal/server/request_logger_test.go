@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +14,13 @@ import (
 
 func TestRequestLogger(t *testing.T) {
 	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		outcome error
+	}{{"success without HTTP log", nil}, {"handler failure without HTTP log", io.ErrUnexpectedEOF}} {
+		t.Run(tc.name, func(t *testing.T) { t.Parallel(); checkUnavailableRequestLog(t, tc.outcome) })
+	}
 
 	for _, status := range []int{http.StatusOK, http.StatusBadRequest} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -58,4 +66,21 @@ func TestRequestLogger(t *testing.T) {
 			require.NotContains(t, output.String(), "private-token")
 		})
 	}
+}
+
+func checkUnavailableRequestLog(t *testing.T, outcome error) {
+	t.Helper()
+
+	reader, writer := io.Pipe()
+	require.NoError(t, reader.Close())
+	t.Cleanup(func() { _ = writer.Close() })
+
+	e := echo.New()
+	e.Logger.SetOutput(writer)
+
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil), rec)
+	handler := requestLogger()(func(echo.Context) error { return outcome })
+
+	require.ErrorIs(t, handler(c), outcome)
 }

@@ -312,6 +312,34 @@ func (m *MockmiddlewareHandler) EXPECT() *MockmiddlewareHandlerMockRecorder {
 	return m.recorder
 }
 
+// AuditNotesFilter mocks base method.
+func (m *MockmiddlewareHandler) AuditNotesFilter(next echo.HandlerFunc) echo.HandlerFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AuditNotesFilter", next)
+	ret0, _ := ret[0].(echo.HandlerFunc)
+	return ret0
+}
+
+// AuditNotesFilter indicates an expected call of AuditNotesFilter.
+func (mr *MockmiddlewareHandlerMockRecorder) AuditNotesFilter(next interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AuditNotesFilter", reflect.TypeOf((*MockmiddlewareHandler)(nil).AuditNotesFilter), next)
+}
+
+// AuditResourceUpdate mocks base method.
+func (m *MockmiddlewareHandler) AuditResourceUpdate(next echo.HandlerFunc) echo.HandlerFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AuditResourceUpdate", next)
+	ret0, _ := ret[0].(echo.HandlerFunc)
+	return ret0
+}
+
+// AuditResourceUpdate indicates an expected call of AuditResourceUpdate.
+func (mr *MockmiddlewareHandlerMockRecorder) AuditResourceUpdate(next interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AuditResourceUpdate", reflect.TypeOf((*MockmiddlewareHandler)(nil).AuditResourceUpdate), next)
+}
+
 // CheckToken mocks base method.
 func (m *MockmiddlewareHandler) CheckToken(next echo.HandlerFunc) echo.HandlerFunc {
 	m.ctrl.T.Helper()

@@ -1,8 +1,11 @@
 package audit
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -126,26 +129,77 @@ func TestNewAuditor(t *testing.T) {
 	}
 }
 
-func TestAuditor_Create(t *testing.T) {
+func TestCreate(t *testing.T) {
 	t.Parallel()
 
-	hookCalled := false
-	hook := func(ctx context.Context, stash Stash) Stash {
-		hookCalled = true
-		return stash
+	tests := []struct {
+		name      string
+		output    io.Writer
+		wantErr   require.ErrorAssertionFunc
+		wantEvent func(*testing.T, Event)
+	}{
+		{
+			name: "started event", output: io.Discard, wantErr: require.NoError,
+			wantEvent: func(t *testing.T, e Event) {
+				t.Helper()
+				require.NotNil(t, e)
+				stash := e.(*event).stash
+				require.NotNil(t, stash)
+				require.Len(t, stash.fields, 2)
+				require.Equal(t, StatusStarted, stash.fields[fieldStatus].Value)
+			},
+		},
+		{
+			name: "local output fails", output: brokenOutput{},
+			wantErr: func(t require.TestingT, err error, _ ...any) {
+				require.ErrorIs(t, err, ErrLocalWrite)
+				require.ErrorIs(t, err, io.ErrClosedPipe)
+			},
+			wantEvent: func(t *testing.T, e Event) { t.Helper(); require.Nil(t, e) },
+		},
 	}
 
-	auditor := NewAuditor(WithHook(hook))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.NotNil(t, auditor)
-	require.NotNil(t, auditor.logger)
-	require.Len(t, auditor.hooks, 1)
+			hookCalled := false
+			auditor := NewAuditor(WithOutput(tt.output), WithHook(func(_ context.Context, stash Stash) Stash {
+				hookCalled = true
+				return stash
+			}))
+			require.NotNil(t, auditor)
+			require.NotNil(t, auditor.logger)
+			require.Len(t, auditor.hooks, 1)
 
-	e := auditor.Create(context.Background())
+			e, err := auditor.Create(t.Context())
+			tt.wantErr(t, err)
 
-	require.NotNil(t, e)
-	require.NotNil(t, e.(*event).stash)
-	require.Len(t, e.(*event).stash.fields, 2)
-	require.Equal(t, StatusStarted, e.(*event).stash.fields[fieldStatus].Value)
-	require.True(t, hookCalled)
+			tt.wantEvent(t, e)
+			require.True(t, hookCalled)
+		})
+	}
+}
+
+func TestWithDeliveryTimeout(t *testing.T) {
+	t.Parallel()
+
+	var a Auditor
+
+	WithDeliveryTimeout(3 * time.Second)(&a)
+
+	require.Equal(t, 3*time.Second, a.deliveryTimeout)
+}
+
+func TestWithOutput(t *testing.T) {
+	t.Parallel()
+
+	var (
+		a      Auditor
+		output bytes.Buffer
+	)
+
+	WithOutput(&output)(&a)
+	a.logger.Log(t.Context(), LevelAudit, "captured")
+	require.Contains(t, output.String(), "captured")
 }

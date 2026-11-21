@@ -3,20 +3,26 @@ package audit
 import (
 	"auth-service/pkg/audit/internal"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
+
+// ErrLocalWrite означает, что локальный журнал не подтвердил запись события.
+var ErrLocalWrite = errors.New("local audit write failed")
 
 // event - событие ошибки.
 // Хранит внутри поля, необходимые для логирования ошибки.
 type event struct {
-	stash  Stash
-	err    error
-	logger *slog.Logger
-	sender Sender
+	deliveryTimeout time.Duration
+	stash           Stash
+	err             error
+	logger          *slog.Logger
+	sender          Sender
 
 	// какие уровни отправлять в rabbitmq. если не заданы, то отправляются все уровни.
 	// если установлены и levels, и kinds, то событие будет отправлено только если оно соответствует обоим условиям.
@@ -75,18 +81,18 @@ func (e *event) End(ctx context.Context) error {
 		e.Append(StatusField(StatusCompleted))
 	}
 
-	e.log(ctx)
+	localErr := e.log(ctx)
 
 	val, ok := e.stash.fields[fieldKind]
 	if !ok {
-		return nil // если нет kind -> не ошибка -> не отправляем
+		return localErr // если нет kind -> не ошибка -> не отправляем
 	}
 
 	kind := val.Value.(Kind)
 
 	val, ok = e.stash.fields[fieldLevel]
 	if !ok {
-		return fmt.Errorf("fieldLevel not found")
+		return errors.Join(localErr, errors.New("fieldLevel not found"))
 	}
 
 	level := val.Value.(ErrorLevel)
@@ -101,13 +107,20 @@ func (e *event) End(ctx context.Context) error {
 			fields[fieldCause] = e.err.Error()
 		}
 
+		if e.deliveryTimeout > 0 {
+			var cancel context.CancelFunc
+
+			ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), e.deliveryTimeout)
+			defer cancel()
+		}
+
 		err := e.sender.Send(ctx, fields)
 		if err != nil {
-			return fmt.Errorf("send event: %w", err)
+			return errors.Join(localErr, fmt.Errorf("send event: %w", err))
 		}
 	}
 
-	return nil
+	return localErr
 }
 
 func (e *event) shouldSend(kind Kind, level ErrorLevel) bool {
@@ -147,7 +160,7 @@ func (e *event) shouldSend(kind Kind, level ErrorLevel) bool {
 	return kindOK && levelOK
 }
 
-func (e *event) log(ctx context.Context) {
+func (e *event) log(ctx context.Context) error {
 	attrs := make([]slog.Attr, 0, len(e.stash.fields))
 
 	for k, v := range e.stash.fields {
@@ -158,5 +171,12 @@ func (e *event) log(ctx context.Context) {
 		attrs = append(attrs, slog.Any("error", e.err.Error()))
 	}
 
-	e.logger.LogAttrs(ctx, LevelAudit, "audit event", attrs...)
+	record := slog.NewRecord(time.Now(), LevelAudit, "audit event", 0)
+	record.AddAttrs(attrs...)
+
+	if err := e.logger.Handler().Handle(ctx, record); err != nil {
+		return fmt.Errorf("%w: %w", ErrLocalWrite, err)
+	}
+
+	return nil
 }

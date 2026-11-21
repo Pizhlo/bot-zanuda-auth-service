@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/sirupsen/logrus"
 )
 
 // requestLogger сохраняет JSON-поля прежнего Echo Logger и обработку HTTP-ошибок.
@@ -24,14 +25,18 @@ func requestLogger() echo.MiddlewareFunc {
 
 			bytesIn, _ := strconv.ParseInt(v.ContentLength, 10, 64)
 
-			return json.NewEncoder(c.Logger().Output()).Encode(map[string]any{
+			if err := json.NewEncoder(c.Logger().Output()).Encode(map[string]any{
 				"time": time.Now().Format(time.RFC3339Nano),
 				"id":   v.RequestID, "remote_ip": v.RemoteIP, "host": v.Host,
 				"method": v.Method, "uri": v.URI, "user_agent": v.UserAgent,
 				"status": v.Status, "error": errorText,
 				"latency": v.Latency.Nanoseconds(), "latency_human": v.Latency.String(),
 				"bytes_in": bytesIn, "bytes_out": v.ResponseSize,
-			})
+			}); err != nil {
+				logrus.Warn("failed to write HTTP request log")
+			}
+
+			return nil
 		},
 	})
 }

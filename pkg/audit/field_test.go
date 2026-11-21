@@ -2,7 +2,6 @@ package audit
 
 import (
 	"auth-service/pkg/audit/internal"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -172,11 +171,11 @@ func TestKindField(t *testing.T) {
 func TestCause(t *testing.T) {
 	t.Parallel()
 
-	field := cause(errors.New("test"))
+	field := cause("test")
 
 	require.NotNil(t, field)
 	require.Equal(t, internal.FieldID(fieldCause), field.FieldID)
-	require.Equal(t, errors.New("test"), field.Value)
+	require.Equal(t, "test", field.Value)
 }
 
 func TestStatusField(t *testing.T) {

@@ -2,10 +2,8 @@ package auth
 
 import (
 	"auth-service/internal/model"
-	"auth-service/internal/service/internal"
 	db "auth-service/internal/storage"
 	"auth-service/internal/storage/vault"
-	"auth-service/pkg/audit"
 	"context"
 	"crypto/subtle"
 	"errors"
@@ -31,10 +29,7 @@ var (
 	ErrEmptyLoginRequest = errors.New("empty login request")
 )
 
-const (
-	internalAPIAudience = "zanuda-internal-api"
-	serviceName         = "auth-service"
-)
+const internalAPIAudience = "zanuda-internal-api"
 
 // Login проверяет grant type и вызывает соответствующую функцию.
 // Допустимые grant type:
@@ -45,115 +40,30 @@ func (s *Service) Login(ctx context.Context, req model.LoginRequest) (model.Logi
 	case model.ClientCredentialsGrantType:
 		return s.loginWithClientCredentials(ctx, req)
 	default:
-		operationLogin := fmt.Sprintf("%s.%s", serviceName, "login")
-
-		ctx = internal.WithOperation(ctx, operationLogin)
-
-		event := s.auditor.Create(fillCtx(ctx))
-		defer internal.WithPanicRecovery(ctx, event)()
-
-		event.AppendContext(audit.EventContext{
-			"client_id":  req.ClientID,
-			"grant_type": req.GrantType,
-			"scope":      req.Scope,
-		})
-
 		if req.IsEmpty() {
-			event.Append(audit.Message(messageEmptyLoginRequest))
-			event.WithError(audit.ErrCodeEmptyLoginRequest, audit.KindValidation, ErrEmptyLoginRequest)
-			event.Append(audit.Level(audit.ErrLevelWarn))
-
 			return model.LoginResponse{}, ErrEmptyLoginRequest
 		}
-
-		event.WithError(audit.ErrCodeInvalidGrantType, audit.KindValidation, ErrInvalidGrantType)
-		event.Append(audit.Level(audit.ErrLevelWarn))
 
 		return model.LoginResponse{}, ErrInvalidGrantType
 	}
 }
 
-const (
-	messageServiceNotFound     = "unknown service client. Service client not found (invalid client_id?)"
-	messageInactiveClient      = "client is inactive"
-	messageInvalidSecret       = "invalid client secret"
-	messageVaultSecretNotFound = "vault secret not found"
-	messageEmptyLoginRequest   = "got empty body in login request"
-)
-
-//nolint:funlen // много проверок аудита.
 func (s *Service) loginWithClientCredentials(ctx context.Context, req model.LoginRequest) (model.LoginResponse, error) {
-	operationLoginWithClientCredentials := fmt.Sprintf("%s.%s", serviceName, "loginWithClientCredentials")
-
-	ctx = internal.WithOperation(ctx, operationLoginWithClientCredentials)
-
-	event := s.auditor.Create(fillCtx(ctx))
-	defer internal.WithPanicRecovery(ctx, event)()
-
-	event.AppendContext(audit.EventContext{
-		"client_id":  req.ClientID,
-		"grant_type": req.GrantType,
-		"scope":      req.Scope,
-	})
-
 	client, err := s.validateClient(ctx, req.ClientID)
 	if err != nil {
-		if errors.Is(err, ErrInactiveClient) {
-			event.Append(audit.Message(messageInactiveClient))
-			event.WithError(audit.ErrCodeInactiveClient, audit.KindDomain, ErrInactiveClient)
-			event.Append(audit.Level(audit.ErrLevelError))
-
-			return model.LoginResponse{}, ErrInactiveClient
-		}
-
-		if errors.Is(err, db.ErrNotFound) {
-			event.Append(audit.Message(messageServiceNotFound))
-			event.WithError(audit.ErrCodeServiceNotFound, audit.KindDomain, err)
-			event.Append(audit.Level(audit.ErrLevelError))
-
-			return model.LoginResponse{}, err
-		}
-
-		event.WithError(audit.ErrCodeServiceNotFound, audit.KindInfra, err)
-		event.Append(audit.Level(audit.ErrLevelError))
-
 		return model.LoginResponse{}, err
 	}
 
-	err = s.validateSecret(req.ClientID, req.ClientSecret)
-	if err != nil {
-		if errors.Is(err, ErrInvalidSecret) {
-			event.Append(audit.Message(messageInvalidSecret))
-			event.WithError(audit.ErrCodeInvalidSecret, audit.KindDomain, ErrInvalidSecret)
-			event.Append(audit.Level(audit.ErrLevelWarn))
-
-			return model.LoginResponse{}, ErrInvalidSecret
-		}
-
+	if err := s.validateSecret(req.ClientID, req.ClientSecret); err != nil {
 		if errors.Is(err, ErrClientSecretNotFound) {
-			event.Append(audit.Message(messageVaultSecretNotFound))
-			event.WithError(audit.ErrCodeVaultSecretNotFound, audit.KindInfra, ErrClientSecretNotFound)
-			event.Append(audit.Level(audit.ErrLevelError))
-
 			return model.LoginResponse{}, ErrInvalidSecret
 		}
-
-		errCode := audit.ErrCodeVaultSecretNotFound
-		if !errors.Is(err, db.ErrNotFound) {
-			errCode = audit.ErrCodeServiceUnavailable
-		}
-
-		event.WithError(errCode, audit.KindInfra, err)
-		event.Append(audit.Message(messageVaultSecretNotFound))
-		event.Append(audit.Level(audit.ErrLevelError))
 
 		return model.LoginResponse{}, err
 	}
 
 	scope, err := s.validateAndGetScopes(client.Scopes, string(req.Scope))
 	if err != nil {
-		event.WithError(audit.ErrCodeInvalidScope, audit.KindValidation, ErrInvalidScope)
-
 		return model.LoginResponse{}, ErrInvalidScope
 	}
 
@@ -170,9 +80,6 @@ func (s *Service) loginWithClientCredentials(ctx context.Context, req model.Logi
 		},
 	})
 	if err != nil {
-		event.WithError(audit.ErrCodeTokenGenerationFailed, audit.KindInfra, err)
-		event.Append(audit.Level(audit.ErrLevelError))
-
 		return model.LoginResponse{}, err
 	}
 

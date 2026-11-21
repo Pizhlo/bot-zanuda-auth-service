@@ -1,16 +1,16 @@
-//nolint:funlen,dupl // тесты
+//nolint:funlen // Таблица содержит HTTP-контракт синхронизации для всех исходов.
 package v0
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
+	"strings"
 	"testing"
 
+	"auth-service/internal/api/internal/response"
 	"auth-service/internal/api/v0/mocks"
 	"auth-service/internal/model"
 	"auth-service/internal/service/fga"
@@ -21,39 +21,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 )
-
-// errorResponse - ответ для случая, когда операция прошла неуспешно.
-type errorResponse struct {
-	RequestID    uuid.UUID      `json:"request_id"`
-	Status       model.Status   `json:"status"`
-	Result       model.Result   `json:"result"`
-	Resource     model.Resource `json:"resource"`
-	ErrorMessage errorMessage   `json:"error"`
-	Meta         model.Meta     `json:"meta"`
-}
-
-type errorMessage struct {
-	Code    audit.ErrorCode `json:"code"`
-	Message string          `json:"message"`
-	Details struct {
-		Operation          model.Operation `json:"operation"`
-		*fga.DetailedError `json:"detailed_error"`
-	} `json:"details"`
-}
-
-func newMessage(code audit.ErrorCode, message string, operation model.Operation, detailedError *fga.DetailedError) errorMessage {
-	return errorMessage{
-		Code:    code,
-		Message: message,
-		Details: struct {
-			Operation          model.Operation `json:"operation"`
-			*fga.DetailedError `json:"detailed_error"`
-		}{
-			Operation:     operation,
-			DetailedError: detailedError,
-		},
-	}
-}
 
 func TestNewResourceHandler(t *testing.T) {
 	t.Parallel()
@@ -116,515 +83,141 @@ func TestNewResourceHandler(t *testing.T) {
 	}
 }
 
-func TestResourceHandler_UpdateResource(t *testing.T) {
+func TestUpdateResource(t *testing.T) {
 	t.Parallel()
 
-	type wantResponse struct {
-		status  int
-		resp    *model.UpdateResourceResponse
-		errResp *errorResponse
-	}
-
-	requestID := uuid.New()
-	decisionID := uuid.New()
-	noteID := uuid.New()
-	spaceID := uuid.New()
-	ownerID := uuid.New()
-
-	updateRequest := model.UpdateResourceRequest{
-		RequestID:      requestID,
-		IdempotencyKey: "idempotency-key",
-		TelegramID:     12345,
-		DecisionID:     decisionID,
-		Resource:       model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-		Operation:      model.OperationCreate,
-		ChangeType:     model.ChangeTypeResourceAdded,
+	note := model.UpdateResourceRequest{
+		RequestID: uuid.New(), DecisionID: uuid.New(), IdempotencyKey: "idempotency-key", TelegramID: 12345,
+		Resource:  model.Resource{ID: uuid.New(), Type: model.ResourceTypeNote},
+		Operation: model.OperationCreate, ChangeType: model.ChangeTypeResourceAdded,
 		Relations: model.Relation{
-			Owner:  model.Resource{ID: ownerID, Type: model.ResourceTypeUser},
-			Parent: model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+			Owner:  model.Resource{ID: uuid.New(), Type: model.ResourceTypeUser},
+			Parent: model.Resource{ID: uuid.New(), Type: model.ResourceTypeSpace},
 		},
-		Context: model.Context{
-			SourceService: "notes-service",
-			EventType:     "note.created",
-			TraceID:       "trace-id",
-		},
+		Context: model.Context{SourceService: "notes-service", EventType: "note.created", TraceID: "trace-id"},
 	}
-
-	updateResponse := model.UpdateResourceResponse{
-		RequestID:      requestID,
-		IdempotencyKey: "idempotency-key",
-		Status:         model.StatusCompleted,
-		Result:         model.ResultApplied,
-		Resource:       updateRequest.Resource,
-		Meta: model.Meta{
-			AuthModelID: "model-id",
-		},
-	}
-
-	tests := []struct {
-		name       string
-		body       model.UpdateResourceRequest
-		setupMocks func(t *testing.T, resourceSvc *mocks.MockresourceService)
-		checkWant  func(t *testing.T, actual wantResponse)
-	}{
-		{
-			name: "success",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), updateRequest).
-					Return(updateResponse, nil)
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusOK, actual.status)
-				require.Equal(t, &updateResponse, actual.resp)
-			},
-		},
-		{
-			name: "error case: no tuples to write or delete",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, fga.ErrNoTuplesToWriteOrDelete)
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusBadRequest, actual.status)
-				require.Equal(t, &errorResponse{
-					RequestID:    requestID,
-					Status:       model.StatusError,
-					Result:       model.ResultFailed,
-					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), updateRequest.Operation, nil),
-					Meta:         model.Meta{},
-				}, actual.errResp)
-			},
-		},
-		{
-			name: "error case: resource already exists or not found",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, fga.ErrResourceAlreadyExistsOrNotFound)
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusConflict, actual.status)
-				require.Equal(t, &errorResponse{
-					RequestID:    requestID,
-					Status:       model.StatusError,
-					Result:       model.ResultFailed,
-					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrCodeResourceAlreadyExistsOrNotFound, fga.ErrResourceAlreadyExistsOrNotFound.Error(), updateRequest.Operation, nil),
-					Meta:         model.Meta{},
-				}, actual.errResp)
-			},
-		},
-		{
-			name: "error case: user not found",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, fga.ErrUserNotFound)
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusNotFound, actual.status)
-				require.Equal(t, &errorResponse{
-					RequestID:    requestID,
-					Status:       model.StatusError,
-					Result:       model.ResultFailed,
-					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrCodeUserNotFound, fga.ErrUserNotFound.Error(), updateRequest.Operation, nil),
-					Meta:         model.Meta{},
-				}, actual.errResp)
-			},
-		},
-		{
-			name: "error case: detailed error",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, &fga.DetailedError{
-						Err:     fga.ErrOwnerRequired,
-						Message: "owner is required",
-						Value:   "empty owner",
-					})
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusBadRequest, actual.status)
-				// Err не сериализуется в JSON (json:"-"), поэтому в ответе он nil.
-				require.Equal(t, &errorResponse{
-					RequestID: requestID,
-					Status:    model.StatusError,
-					Result:    model.ResultFailed,
-					Resource:  updateRequest.Resource,
-					ErrorMessage: newMessage(
-						audit.ErrCodeOwnerRequired,
-						fga.ErrOwnerRequired.Error(),
-						updateRequest.Operation,
-						&fga.DetailedError{
-							Message: "owner is required",
-							Value:   "empty owner",
-						},
-					),
-					Meta: model.Meta{},
-				}, actual.errResp)
-			},
-		},
-		{
-			name: "error case: internal server error",
-			body: updateRequest,
-			setupMocks: func(t *testing.T, resourceSvc *mocks.MockresourceService) {
-				t.Helper()
-
-				resourceSvc.EXPECT().
-					UpdateResource(gomock.Any(), gomock.Any()).
-					Return(model.UpdateResourceResponse{}, errors.New("write failed"))
-			},
-			checkWant: func(t *testing.T, actual wantResponse) {
-				t.Helper()
-
-				require.Equal(t, http.StatusInternalServerError, actual.status)
-				require.Equal(t, &errorResponse{
-					RequestID:    requestID,
-					Status:       model.StatusError,
-					Result:       model.ResultFailed,
-					Resource:     updateRequest.Resource,
-					ErrorMessage: newMessage(audit.ErrInternalServerError, "internal server error", updateRequest.Operation, nil),
-					Meta:         model.Meta{},
-				}, actual.errResp)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			resourceSvc := mocks.NewMockresourceService(ctrl)
-			tt.setupMocks(t, resourceSvc)
-
-			handler, err := NewResourceHandler(WithResourceService(resourceSvc))
-			require.NoError(t, err)
-
-			e := echo.New()
-
-			bodyBytes, err := json.Marshal(tt.body)
-			require.NoError(t, err)
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewReader(bodyBytes))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			req.Header.Set(userIDHeader, strconv.Itoa(tt.body.TelegramID))
-
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			err = handler.UpdateResource(c)
-			require.NoError(t, err)
-
-			respBody := rec.Body.Bytes()
-
-			wantResp := wantResponse{
-				status: rec.Code,
-			}
-
-			if rec.Code == http.StatusOK {
-				var resp model.UpdateResourceResponse
-				require.NoError(t, json.Unmarshal(respBody, &resp))
-				wantResp.resp = &resp
-			} else {
-				var errResp errorResponse
-				require.NoError(t, json.Unmarshal(respBody, &errResp))
-				wantResp.errResp = &errResp
-			}
-
-			tt.checkWant(t, wantResp)
-		})
-	}
-}
-
-func TestResourceHandler_UpdateResource_InvalidTelegramID(t *testing.T) {
-	t.Parallel()
-
-	validBody := `{
-		"request_id": "019c0000-0000-7000-8000-000000000001",
-		"operation": "create",
-		"resource": {"id": "019c0000-0000-7000-8000-000000000002", "type": "note"},
-		"change_type": "resource_added"
-	}`
-
-	tests := []struct {
-		name       string
-		setHeader  func(req *http.Request)
-		wantStatus int
-		wantError  string
-	}{
-		{
-			name: "missing telegram id header",
-			setHeader: func(req *http.Request) {
-				// заголовок не устанавливаем
-			},
-			wantStatus: http.StatusBadRequest,
-			wantError:  fmt.Sprintf("header '%s' is required", userIDHeader),
-		},
-		{
-			name: "empty telegram id header",
-			setHeader: func(req *http.Request) {
-				req.Header.Set(userIDHeader, "")
-			},
-			wantStatus: http.StatusBadRequest,
-			wantError:  fmt.Sprintf("header '%s' is required", userIDHeader),
-		},
-		{
-			name: "non-numeric telegram id",
-			setHeader: func(req *http.Request) {
-				req.Header.Set(userIDHeader, "abc")
-			},
-			wantStatus: http.StatusBadRequest,
-			wantError:  fmt.Sprintf("invalid telegram id in header '%s'", userIDHeader),
-		},
-		{
-			name: "telegram id with decimal",
-			setHeader: func(req *http.Request) {
-				req.Header.Set(userIDHeader, "123.45")
-			},
-			wantStatus: http.StatusBadRequest,
-			wantError:  fmt.Sprintf("invalid telegram id in header '%s'", userIDHeader),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			resourceSvc := mocks.NewMockresourceService(ctrl)
-
-			handler, err := NewResourceHandler(WithResourceService(resourceSvc))
-			require.NoError(t, err)
-
-			e := echo.New()
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewBufferString(validBody))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			tt.setHeader(req)
-
-			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
-
-			err = handler.UpdateResource(c)
-			require.NoError(t, err)
-
-			var errResp map[string]string
-
-			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &errResp))
-			require.Equal(t, tt.wantStatus, rec.Code)
-			require.Equal(t, tt.wantError, errResp["error"])
-		})
-	}
-}
-
-func TestResourceHandler_UpdateResource_InvalidBody(t *testing.T) {
-	t.Parallel()
-
-	e := echo.New()
-
-	body := `
-	{
-		"request_id": "019c0000-0000-7000-8000-000000000001",
-		"operation": "create",
-	}
-	`
-
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewBufferString(body))
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	req.Header.Set(userIDHeader, "12345")
-
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	resourceSvc := mocks.NewMockresourceService(ctrl)
-
-	handler, err := NewResourceHandler(WithResourceService(resourceSvc))
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	err = handler.UpdateResource(c)
-	require.NoError(t, err)
-
-	var errResp map[string]string
-
-	respBody := rec.Body.Bytes()
-
-	_ = json.Unmarshal(respBody, &errResp)
-
-	require.Equal(t, http.StatusBadRequest, rec.Code)
-	require.Equal(t, "cannot bind request", errResp["error"])
-}
-
-func TestNewMessage(t *testing.T) {
-	t.Parallel()
-
-	message := newMessage(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), model.OperationCreate, nil)
-	require.Equal(t, errorMessage{
-		Code:    audit.ErrNoTuplesToWriteOrDelete,
-		Message: fga.ErrNoTuplesToWriteOrDelete.Error(),
-		Details: struct {
-			Operation          model.Operation `json:"operation"`
-			*fga.DetailedError `json:"detailed_error"`
-		}{Operation: model.OperationCreate, DetailedError: nil},
-	}, message)
-}
-
-func TestResourceHandler_ErrorJSON(t *testing.T) {
-	t.Parallel()
-
-	requestID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
-	noteID := uuid.MustParse("22222222-2222-4222-8222-222222222222")
-	request := model.UpdateResourceRequest{
-		RequestID:  requestID,
-		TelegramID: 12345,
-		Resource:   model.Resource{ID: noteID, Type: model.ResourceTypeNote},
-		Operation:  model.OperationCreate,
-		ChangeType: model.ChangeTypeResourceAdded,
+	applied := model.UpdateResourceResponse{
+		RequestID: note.RequestID, IdempotencyKey: note.IdempotencyKey,
+		Status: model.StatusCompleted, Result: model.ResultApplied, Resource: note.Resource, Meta: model.Meta{AuthModelID: "model-id"},
 	}
 	detailed := &fga.DetailedError{Err: fga.ErrOwnerRequired, Message: "missing owner", Value: "empty owner"}
+	publicDetails := &response.DetailedError{Message: "missing owner", Value: "empty owner"}
+	noCall := func(*mocks.MockresourceService) {}
+	withAudit := (*MiddlewareHandler).AuditResourceUpdate
 
-	tests := []struct {
-		name    string
-		err     error
-		status  int
-		code    audit.ErrorCode
-		message string
-		details string
-	}{
-		{
-			name:    "plain",
-			err:     fga.ErrOwnerRequired,
-			status:  http.StatusBadRequest,
-			code:    audit.ErrCodeOwnerRequired,
-			message: "owner is required",
-			details: "null",
-		},
-		{
-			name:    "not found",
-			err:     fga.ErrUserNotFound,
-			status:  http.StatusNotFound,
-			code:    audit.ErrCodeUserNotFound,
-			message: "user not found",
-			details: "null",
-		},
-		{
-			name:    "conflict",
-			err:     fga.ErrResourceAlreadyExistsOrNotFound,
-			status:  http.StatusConflict,
-			code:    audit.ErrCodeResourceAlreadyExistsOrNotFound,
-			message: "new resource already exists or deleted resource not found",
-			details: "null",
-		},
-		{
-			name:    "unknown",
-			err:     errors.New("private failure"),
-			status:  http.StatusInternalServerError,
-			code:    audit.ErrInternalServerError,
-			message: "internal server error",
-			details: "null",
-		},
-		{
-			name:    "detailed",
-			err:     detailed,
-			status:  http.StatusBadRequest,
-			code:    audit.ErrCodeOwnerRequired,
-			message: "owner is required",
-			details: `{"message":"missing owner","value":"empty owner"}`,
-		},
-		{
-			name:    "wrapped detailed",
-			err:     fmt.Errorf("outer: %w", detailed),
-			status:  http.StatusBadRequest,
-			code:    audit.ErrCodeOwnerRequired,
-			message: "owner is required",
-			details: `{"message":"missing owner","value":"empty owner"}`,
-		},
-		{
-			name:    "wrapped sentinel",
-			err:     fmt.Errorf("outer: %w", fga.ErrOwnerRequired),
-			status:  http.StatusBadRequest,
-			code:    audit.ErrCodeOwnerRequired,
-			message: "outer: owner is required",
-			details: "null",
-		},
-		{
-			name: "unknown detailed",
-			err: &fga.DetailedError{
-				Err:     errors.New("private failure"),
-				Message: "details",
-				Value:   nil,
-			},
-			status:  http.StatusInternalServerError,
-			code:    audit.ErrInternalServerError,
-			message: "internal server error",
-			details: `{"message":"details","value":null}`,
-		},
+	request := func(req model.UpdateResourceRequest) string {
+		body, err := json.Marshal(req)
+		require.NoError(t, err)
+
+		return string(body)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	noteBody := request(note)
+	fail := func(cause error) func(*mocks.MockresourceService) {
+		return expectResourceUpdate(note, model.UpdateResourceResponse{Meta: applied.Meta}, cause)
+	}
+	expected := func(code audit.ErrorCode, message string, details *response.DetailedError) response.ResourceBody {
+		return expectedResourceFailure(note, applied.Meta, code, message, details)
+	}
+
+	for _, tc := range []struct {
+		name             string
+		startAudit       func(*MiddlewareHandler, echo.HandlerFunc) echo.HandlerFunc
+		body, telegramID string
+		expect           func(*mocks.MockresourceService)
+		status           int
+		reply            any
+	}{
+		{"without audit", withoutRequestAudit, noteBody, "12345", noCall, http.StatusInternalServerError, map[string]string{"error": audit.ErrMissingAttempt.Error()}},
+		{"missing Telegram header", withAudit, noteBody, "", noCall, http.StatusBadRequest, map[string]string{"error": "header 'X-Telegram-User-Id' is required"}},
+		{"invalid Telegram header", withAudit, noteBody, "abc", noCall, http.StatusBadRequest, map[string]string{"error": "invalid telegram id in header 'X-Telegram-User-Id'"}},
+		{"invalid JSON", withAudit, "{", "12345", noCall, http.StatusBadRequest, map[string]string{"error": "cannot bind request"}},
+		{"applied", withAudit, noteBody, "12345", expectResourceUpdate(note, applied, nil), http.StatusOK, applied},
+		{"no tuple changes", withAudit, noteBody, "12345", fail(fga.ErrNoTuplesToWriteOrDelete), http.StatusBadRequest, expected(audit.ErrNoTuplesToWriteOrDelete, fga.ErrNoTuplesToWriteOrDelete.Error(), nil)},
+		{"missing owner", withAudit, noteBody, "12345", fail(fga.ErrOwnerRequired), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "owner is required", nil)},
+		{"missing user", withAudit, noteBody, "12345", fail(fga.ErrUserNotFound), http.StatusNotFound, expected(audit.ErrCodeUserNotFound, "user not found", nil)},
+		{"resource conflict", withAudit, noteBody, "12345", fail(fga.ErrResourceAlreadyExistsOrNotFound), http.StatusConflict, expected(audit.ErrCodeResourceAlreadyExistsOrNotFound, "new resource already exists or deleted resource not found", nil)},
+		{"unclassified failure", withAudit, noteBody, "12345", fail(errors.New("private failure")), http.StatusInternalServerError, expected(audit.ErrInternalServerError, "internal server error", nil)},
+		{"public details", withAudit, noteBody, "12345", fail(detailed), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "owner is required", publicDetails)},
+		{"wrapped public details", withAudit, noteBody, "12345", fail(fmt.Errorf("outer: %w", detailed)), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "owner is required", publicDetails)},
+		{"wrapped sentinel", withAudit, noteBody, "12345", fail(fmt.Errorf("outer: %w", fga.ErrOwnerRequired)), http.StatusBadRequest, expected(audit.ErrCodeOwnerRequired, "outer: owner is required", nil)},
+		{"unknown cause with public details", withAudit, noteBody, "12345", fail(&fga.DetailedError{Err: errors.New("private failure"), Message: "details"}), http.StatusInternalServerError, expected(audit.ErrInternalServerError, "internal server error", &response.DetailedError{Message: "details"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			svc := mocks.NewMockresourceService(gomock.NewController(t))
-			svc.EXPECT().UpdateResource(gomock.Any(), request).
-				Return(model.UpdateResourceResponse{Meta: model.Meta{AuthModelID: "model-id"}}, tt.err)
-			handler, err := NewResourceHandler(WithResourceService(svc))
-			require.NoError(t, err)
+			tc.expect(svc)
+			h := ResourceHandler{resourceService: svc}
 
-			body, err := json.Marshal(request)
-			require.NoError(t, err)
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/resources", bytes.NewReader(body))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-			req.Header.Set(userIDHeader, "12345")
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v0/resources/update", strings.NewReader(tc.body))
+			r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			r.Header.Set(userIDHeader, tc.telegramID)
 
 			rec := httptest.NewRecorder()
-			require.NoError(t, handler.UpdateResource(echo.New().NewContext(req, rec)))
-			require.Equal(t, tt.status, rec.Code)
+			c := echo.New().NewContext(r, rec)
 
-			want := fmt.Sprintf(`{
-				"request_id":"11111111-1111-4111-8111-111111111111",
-				"status":"error","result":"failed",
-				"resource":{"id":"22222222-2222-4222-8222-222222222222","type":"note"},
-				"error":{"code":%q,"message":%q,"details":{"operation":"create","detailed_error":%s}},
-				"meta":{"auth_model_id":"model-id"}
-			}`, tt.code, tt.message, tt.details)
-			require.JSONEq(t, want, rec.Body.String())
+			err := tc.startAudit(testAuditMiddleware(t), h.UpdateResource)(c)
+			require.NoError(t, err)
+
+			require.Equal(t, tc.status, rec.Code)
+			wantJSON, err := json.Marshal(tc.reply)
+			require.NoError(t, err)
+
+			require.JSONEq(t, string(wantJSON), rec.Body.String())
+		})
+	}
+}
+
+func expectResourceUpdate(req model.UpdateResourceRequest, reply model.UpdateResourceResponse, cause error) func(*mocks.MockresourceService) {
+	return func(svc *mocks.MockresourceService) {
+		svc.EXPECT().UpdateResource(gomock.Any(), req).Return(reply, cause)
+	}
+}
+
+func expectedResourceFailure(req model.UpdateResourceRequest, meta model.Meta, code audit.ErrorCode, message string, details *response.DetailedError) response.ResourceBody {
+	return response.ResourceBody{
+		RequestID: req.RequestID, Status: model.StatusError, Result: model.ResultFailed,
+		Resource:     response.Resource{ID: req.Resource.ID, Type: req.Resource.Type},
+		Meta:         response.Meta{AuthModelID: meta.AuthModelID},
+		ErrorMessage: response.Message{Code: code, Message: message, Details: response.Details{Operation: req.Operation, DetailedError: details}},
+	}
+}
+
+func TestDecodeResourceUpdate(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+
+	wantError := func(message string) require.ErrorAssertionFunc {
+		return func(t require.TestingT, err error, _ ...any) {
+			require.ErrorContains(t, err, message)
+		}
+	}
+
+	for _, tt := range []struct {
+		name, header, body string
+		want               model.UpdateResourceRequest
+		wantErr            require.ErrorAssertionFunc
+	}{
+		{"missing header", "", "", model.UpdateResourceRequest{}, wantError("is required")},
+		{"nonnumeric header", "x", "{}", model.UpdateResourceRequest{}, wantError("invalid telegram id")},
+		{"decimal header", "123.45", "{}", model.UpdateResourceRequest{}, wantError("invalid telegram id")},
+		{"invalid JSON", "42", "{", model.UpdateResourceRequest{TelegramID: 42}, wantError("cannot bind request")},
+		{"valid", "42", fmt.Sprintf(`{"request_id":%q}`, id), model.UpdateResourceRequest{TelegramID: 42, RequestID: id}, require.NoError},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			r := httptest.NewRequestWithContext(t.Context(), "POST", "/", strings.NewReader(tt.body))
+			r.Header.Set(userIDHeader, tt.header)
+			r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+			var req model.UpdateResourceRequest
+
+			err := decodeResourceUpdate(echo.New().NewContext(r, httptest.NewRecorder()), &req)
+			tt.wantErr(t, err)
+
+			require.Equal(t, tt.want, req)
 		})
 	}
 }

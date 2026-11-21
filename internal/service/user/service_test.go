@@ -1,17 +1,11 @@
 package user
 
 import (
-	"auth-service/internal/service/internal"
 	"errors"
-	"fmt"
-	"reflect"
 	"testing"
 	"time"
-	"unsafe"
 
 	"auth-service/internal/service/user/mocks"
-	"auth-service/pkg/audit"
-	"auth-service/pkg/audit/testaudit"
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
@@ -27,7 +21,6 @@ func TestNew(t *testing.T) {
 	type testMocks struct {
 		storage *mocks.MockuserStorage
 		cache   *mocks.Mockcache
-		auditor auditor
 	}
 
 	tests := []struct {
@@ -47,7 +40,6 @@ func TestNew(t *testing.T) {
 					WithStorage(m.storage),
 					WithCache(m.cache),
 					WithCacheTTL(1 * time.Hour),
-					WithAuditor(m.auditor),
 				}
 			},
 			createMocks: func(t *testing.T, ctrl *gomock.Controller) *testMocks {
@@ -56,7 +48,6 @@ func TestNew(t *testing.T) {
 				return &testMocks{
 					storage: mocks.NewMockuserStorage(ctrl),
 					cache:   mocks.NewMockcache(ctrl),
-					auditor: testaudit.NewAuditor(t),
 				}
 			},
 			createWant: func(t *testing.T, m *testMocks) *Service {
@@ -66,7 +57,6 @@ func TestNew(t *testing.T) {
 					storage:  m.storage,
 					cache:    m.cache,
 					cacheTTL: 1 * time.Hour,
-					auditor:  m.auditor,
 				}
 			},
 			wantErr: require.NoError,
@@ -88,7 +78,6 @@ func TestNew(t *testing.T) {
 				return &testMocks{
 					cache:   mocks.NewMockcache(ctrl),
 					storage: mocks.NewMockuserStorage(ctrl),
-					auditor: testaudit.NewAuditor(t),
 				}
 			},
 			createWant: func(t *testing.T, m *testMocks) *Service {
@@ -112,7 +101,6 @@ func TestNew(t *testing.T) {
 				return []option{
 					WithStorage(m.storage),
 					WithCacheTTL(1 * time.Hour),
-					WithAuditor(m.auditor),
 				}
 			},
 			createMocks: func(t *testing.T, ctrl *gomock.Controller) *testMocks {
@@ -143,7 +131,6 @@ func TestNew(t *testing.T) {
 				return []option{
 					WithStorage(m.storage),
 					WithCache(m.cache),
-					WithAuditor(m.auditor),
 				}
 			},
 			createMocks: func(t *testing.T, ctrl *gomock.Controller) *testMocks {
@@ -162,38 +149,6 @@ func TestNew(t *testing.T) {
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
 				require.ErrorContains(t, err, "cache ttl is required")
-			},
-			check: func(svc *Service, want *Service) {
-				require.Nil(t, svc)
-			},
-		},
-		{
-			name: "error case: auditor is required",
-			opts: func(t *testing.T, m *testMocks) []option {
-				t.Helper()
-
-				return []option{
-					WithStorage(m.storage),
-					WithCache(m.cache),
-					WithCacheTTL(1 * time.Hour),
-				}
-			},
-			createMocks: func(t *testing.T, ctrl *gomock.Controller) *testMocks {
-				t.Helper()
-
-				return &testMocks{
-					storage: mocks.NewMockuserStorage(ctrl),
-					cache:   mocks.NewMockcache(ctrl),
-				}
-			},
-			createWant: func(t *testing.T, m *testMocks) *Service {
-				t.Helper()
-
-				return nil
-			},
-			wantErr: func(t require.TestingT, err error, i ...interface{}) {
-				require.Error(t, err)
-				require.ErrorContains(t, err, "auditor is required")
 			},
 			check: func(svc *Service, want *Service) {
 				require.Nil(t, svc)
@@ -320,6 +275,7 @@ func TestGetUserIDByTelegramID(t *testing.T) {
 
 	for _, tt := range tests {
 		tt := tt
+
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -334,7 +290,6 @@ func TestGetUserIDByTelegramID(t *testing.T) {
 				WithStorage(storage),
 				WithCache(cache),
 				WithCacheTTL(1*time.Hour),
-				WithAuditor(testaudit.NewAuditor(t)),
 			)
 			require.NoError(t, err)
 
@@ -399,6 +354,7 @@ func TestGetUserIDByTelegramIDAndUpdateCache(t *testing.T) {
 
 	for _, tt := range tests {
 		tt := tt
+
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -413,7 +369,6 @@ func TestGetUserIDByTelegramIDAndUpdateCache(t *testing.T) {
 				WithStorage(storage),
 				WithCache(cache),
 				WithCacheTTL(1*time.Hour),
-				WithAuditor(testaudit.NewAuditor(t)),
 			)
 			require.NoError(t, err)
 
@@ -423,68 +378,4 @@ func TestGetUserIDByTelegramIDAndUpdateCache(t *testing.T) {
 			assert.Equal(t, tt.wantUUID, got)
 		})
 	}
-}
-
-func TestGetUserIDByTelegramIDHook(t *testing.T) {
-	t.Parallel()
-
-	t.Run("adds all supported fields from context", func(t *testing.T) {
-		t.Parallel()
-
-		ctx := t.Context()
-		ctx = internal.WithServiceName(ctx)
-		ctx = internal.WithOperation(ctx, "user.get_user_id_by_telegram_id")
-		ctx = internal.WithLevel(ctx, audit.ErrLevelWarn)
-		ctx = internal.WithErrorCode(ctx, audit.ErrCodeUserNotFound)
-		ctx = internal.WithMessageCtx(ctx, audit.EventContext{"telegram_id": "424242"})
-		ctx = internal.WithUserID(ctx, "00000000-0000-0000-0000-000000000001")
-		ctx = internal.WithKind(ctx, audit.KindDomain)
-
-		stash := GetUserIDByTelegramIDHook(ctx, audit.Stash{})
-		values := stashFieldsByName(stash)
-
-		require.Equal(t, "auth-service", values["service_name"])
-		require.Equal(t, "user.get_user_id_by_telegram_id", values["operation"])
-		require.Equal(t, audit.ErrLevelWarn, values["level"])
-		require.Equal(t, audit.ErrCodeUserNotFound, values["error_code"])
-		require.Equal(t, audit.EventContext{"telegram_id": "424242"}, values["context"])
-		require.Equal(t, "00000000-0000-0000-0000-000000000001", values["user_id"])
-		require.Equal(t, audit.KindDomain, values["kind"])
-	})
-
-	t.Run("returns unchanged stash for empty context", func(t *testing.T) {
-		t.Parallel()
-
-		stash := GetUserIDByTelegramIDHook(t.Context(), audit.Stash{})
-		values := stashFieldsByName(stash)
-
-		require.Empty(t, values)
-	})
-}
-
-func stashFieldsByName(stash audit.Stash) map[string]any {
-	v := reflect.ValueOf(&stash).Elem()
-
-	fields := v.FieldByName("fields")
-	if !fields.IsValid() || fields.IsNil() {
-		return map[string]any{}
-	}
-
-	fields = reflect.NewAt(fields.Type(), unsafe.Pointer(fields.UnsafeAddr())).Elem()
-
-	result := make(map[string]any, fields.Len())
-
-	iter := fields.MapRange()
-	for iter.Next() {
-		keyName := fmt.Sprint(iter.Key().Interface())
-
-		fieldValue := reflect.ValueOf(iter.Value().Interface())
-
-		valueField := fieldValue.FieldByName("Value")
-		if valueField.IsValid() && valueField.CanInterface() {
-			result[keyName] = valueField.Interface()
-		}
-	}
-
-	return result
 }

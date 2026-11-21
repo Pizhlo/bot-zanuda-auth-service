@@ -9,6 +9,8 @@ import (
 
 	"auth-service/internal/api/internal/response"
 	"auth-service/internal/model"
+	"auth-service/internal/service/fga"
+	"auth-service/pkg/audit"
 
 	"github.com/labstack/echo/v4"
 	"github.com/sirupsen/logrus"
@@ -52,49 +54,67 @@ func NewResourceHandler(opts ...resourceHandlerOption) (*ResourceHandler, error)
 	return h, nil
 }
 
+const stageApplyResource = "update_resource"
+
 // UpdateResource обновляет ресурс.
 func (h *ResourceHandler) UpdateResource(c echo.Context) error {
+	a := audit.Current(c.Request().Context(), fga.OperationUpdateResource)
+	if a == nil {
+		return errResponse(c, http.StatusInternalServerError, audit.ErrMissingAttempt)
+	}
+
+	a.At(audit.StageDecodeRequest.String())
+
 	var req model.UpdateResourceRequest
 
-	telegramID := c.Request().Header.Get(userIDHeader)
+	if err := decodeResourceUpdate(c, &req); err != nil {
+		a.Correlate(req.RequestID)
+		a.Fail(audit.ErrCodeValidationFailed, audit.KindValidation, audit.ErrLevelDebug, err.Error(), err)
+		logrus.WithError(err).Warn("invalid resource update")
 
-	if telegramID == "" {
-		logrus.Errorf("invalid telegram id in header '%s'", userIDHeader)
-
-		result := response.SimpleError(http.StatusBadRequest, fmt.Errorf("header '%s' is required", userIDHeader))
-
-		return c.JSON(result.StatusCode, result.Body)
-	}
-
-	telegramIDInt, err := strconv.Atoi(telegramID)
-	if err != nil {
-		logrus.WithError(err).Error("error converting telegram id to int")
-
-		result := response.SimpleError(http.StatusBadRequest, fmt.Errorf("invalid telegram id in header '%s'", userIDHeader))
+		result := response.SimpleError(http.StatusBadRequest, err)
 
 		return c.JSON(result.StatusCode, result.Body)
 	}
 
-	req.TelegramID = telegramIDInt
-
-	if err := c.Bind(&req); err != nil {
-		logrus.WithError(err).Error("error binding request")
-
-		result := response.SimpleError(http.StatusBadRequest, errors.New("cannot bind request"))
-
-		return c.JSON(result.StatusCode, result.Body)
-	}
+	a.Correlate(req.RequestID)
+	a.At(stageApplyResource)
 
 	resp, err := h.resourceService.UpdateResource(c.Request().Context(), req)
 	if err != nil {
+		a.NoteCancellation(err)
 		logrus.WithError(err).Error("error updating resource")
 
 		result := response.ResourceError(err, response.ResourceContext{
 			RequestID: req.RequestID, Resource: req.Resource, Operation: req.Operation, Meta: resp.Meta,
 		})
 
+		a.Fail(result.Body.ErrorMessage.Code, audit.KindDomain, audit.ErrLevelError, result.Body.ErrorMessage.Message, nil)
+
 		return c.JSON(result.StatusCode, result.Body)
 	}
 
+	a.At(audit.StageWriteResponse.String())
+
 	return c.JSON(http.StatusOK, resp)
+}
+
+// decodeResourceUpdate возвращает только сообщения, безопасные для клиента и аудита.
+func decodeResourceUpdate(c echo.Context, req *model.UpdateResourceRequest) error {
+	header := c.Request().Header.Get(userIDHeader)
+	if header == "" {
+		return fmt.Errorf("header '%s' is required", userIDHeader)
+	}
+
+	id, err := strconv.Atoi(header)
+	if err != nil {
+		return fmt.Errorf("invalid telegram id in header '%s'", userIDHeader)
+	}
+
+	req.TelegramID = id
+	if err := c.Bind(req); err != nil {
+		return errors.New("cannot bind request")
+	}
+
+	return nil
 }

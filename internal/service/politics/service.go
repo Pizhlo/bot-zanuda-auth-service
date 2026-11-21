@@ -2,7 +2,6 @@ package politics
 
 import (
 	"auth-service/internal/model"
-	"auth-service/pkg/audit"
 	"context"
 	"errors"
 
@@ -15,11 +14,6 @@ type Service struct {
 	storage                storage
 	spaceAccessChecker     spaceAccessChecker
 	notePermissionResolver notePermissionResolver
-	auditor                auditor
-}
-
-type auditor interface {
-	Create(ctx context.Context) audit.Event
 }
 
 // storage - интерфейс для доступа к хранилищу.
@@ -65,13 +59,6 @@ func WithNotePermissionResolver(resolver notePermissionResolver) option {
 	}
 }
 
-// WithAuditor устанавливает сервис для логирования.
-func WithAuditor(auditor auditor) option {
-	return func(s *Service) {
-		s.auditor = auditor
-	}
-}
-
 // New создает новый сервис политик.
 func New(opts ...option) (*Service, error) {
 	s := &Service{}
@@ -90,10 +77,6 @@ func New(opts ...option) (*Service, error) {
 
 	if s.notePermissionResolver == nil {
 		return nil, errors.New("note permission resolver is required")
-	}
-
-	if s.auditor == nil {
-		return nil, errors.New("auditor is required")
 	}
 
 	return s, nil

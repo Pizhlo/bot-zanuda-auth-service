@@ -4,7 +4,9 @@ import (
 	"auth-service/pkg/audit/internal"
 	"context"
 	"errors"
+	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -111,132 +113,62 @@ func TestEvent_Error(t *testing.T) {
 	require.Empty(t, event.Error())
 }
 
-//nolint:funlen // длинный тест - это ок
-func TestEvent_End(t *testing.T) {
+func TestEnd(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name       string
-		event      *event
-		fields     map[fieldID]internal.Field
-		wantFields map[fieldID]any
-		expected   int
-	}{
-		{
-			name: "success",
-			event: &event{
-				stash: Stash{
-					fields: map[fieldID]internal.Field{
-						fieldStatus: {
-							FieldID: internal.FieldID(fieldStatus),
-							Value:   StatusCompleted,
-						},
-						fieldContext: {
-							FieldID: internal.FieldID(fieldContext),
-							Value:   EventContext{"ctx1": "test"},
-						},
-						fieldOperation: {
-							FieldID: internal.FieldID(fieldOperation),
-							Value:   "test",
-						},
-						fieldCause: {
-							FieldID: internal.FieldID(fieldCause),
-							Value:   errors.New("test"),
-						},
-					},
-				},
-				logger: InitLogger(),
-			},
-			wantFields: nil,
-			expected:   0,
-		},
-		{
-			name: "failed",
-			event: &event{
-				stash: Stash{
-					fields: map[fieldID]internal.Field{
-						fieldStatus: {
-							FieldID: internal.FieldID(fieldStatus),
-							Value:   StatusFailed,
-						},
-						fieldContext: {
-							FieldID: internal.FieldID(fieldContext),
-							Value:   EventContext{"ctx1": "test"},
-						},
-						fieldOperation: {
-							FieldID: internal.FieldID(fieldOperation),
-							Value:   "test",
-						},
-						fieldKind: {
-							FieldID: internal.FieldID(fieldKind),
-							Value:   KindValidation,
-						},
-						fieldLevel: {
-							FieldID: internal.FieldID(fieldLevel),
-							Value:   ErrLevelError,
-						},
-					},
-				},
-				logger: InitLogger(),
-				sender: &mockSender{},
-			},
-			wantFields: map[fieldID]any{
-				fieldLevel:     ErrLevelError,
-				fieldKind:      KindValidation,
-				fieldOperation: "test",
-				fieldStatus:    StatusFailed,
-				fieldContext:   EventContext{"ctx1": "test"},
-			},
-			expected: 1,
-		},
-		{
-			name: "failed with error",
-			event: &event{
-				err: errors.New("test"),
-				stash: Stash{
-					fields: map[fieldID]internal.Field{
-						fieldStatus: {
-							FieldID: internal.FieldID(fieldStatus),
-							Value:   StatusFailed,
-						},
-						fieldKind: {
-							FieldID: internal.FieldID(fieldKind),
-							Value:   KindValidation,
-						},
-						fieldLevel: {
-							FieldID: internal.FieldID(fieldLevel),
-							Value:   ErrLevelError,
-						},
-					},
-				},
-				logger: InitLogger(),
-				sender: &mockSender{},
-			},
-			wantFields: map[fieldID]any{
-				fieldStatus: StatusFailed,
-				fieldKind:   KindValidation,
-				fieldLevel:  ErrLevelError,
-				fieldCause:  "test",
-			},
-			expected: 1,
-		},
-	}
+	cause := errors.New("test")
+	fields := []internal.Field{StatusField(StatusFailed), KindField(KindValidation), Level(ErrLevelError)}
+	ctxAndOperation := append([]internal.Field{Operation("test"), ContextField(EventContext{"ctx1": "test"}, Stash{})}, fields...)
+	wantFields := map[fieldID]any{fieldStatus: StatusFailed, fieldKind: KindValidation, fieldLevel: ErrLevelError}
+	expectFields := func(want map[fieldID]any) func(*mockSender) { return func(s *mockSender) { s.wantFields = want } }
+	noSetup := func(*mockSender) {}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+	success := func(t *testing.T, err error) { t.Helper(); require.NoError(t, err) }
+	for _, tc := range []struct {
+		name    string
+		fields  []internal.Field
+		cause   error
+		output  io.Writer
+		timeout time.Duration
+		setup   func(*mockSender)
+		calls   int
+		want    func(*testing.T, error)
+	}{
+		{"no kind", []internal.Field{StatusField(StatusCompleted)}, nil, io.Discard, 0, noSetup, 0, success},
+		{"missing level", []internal.Field{KindField(KindDomain)}, nil, io.Discard, 0, noSetup, 0, func(t *testing.T, err error) { t.Helper(); require.ErrorContains(t, err, "fieldLevel not found") }},
+		{"failed with fields", ctxAndOperation, nil, io.Discard, 0, expectFields(map[fieldID]any{fieldStatus: StatusFailed, fieldKind: KindValidation, fieldLevel: ErrLevelError, fieldOperation: "test", fieldContext: EventContext{"ctx1": "test"}}), 1, success},
+		{"failed with cause", fields, cause, io.Discard, 0, expectFields(map[fieldID]any{fieldStatus: StatusFailed, fieldKind: KindValidation, fieldLevel: ErrLevelError, fieldCause: "test"}), 1, success},
+		{"started becomes completed", []internal.Field{StatusField(StatusStarted), KindField(KindDomain), Level(ErrLevelInfo)}, nil, io.Discard, 0, expectFields(map[fieldID]any{fieldStatus: StatusCompleted, fieldKind: KindDomain, fieldLevel: ErrLevelInfo}), 1, success},
+		{"delivery after request cancellation", fields, nil, io.Discard, time.Second, func(s *mockSender) {
+			s.wantFields = wantFields
+			s.checkContext = func(ctx context.Context) {
+				require.NoError(s.t, ctx.Err())
+				_, ok := ctx.Deadline()
+				require.True(s.t, ok)
+			}
+		}, 1, success},
+		{"local log failure, broker available", fields, nil, brokenOutput{}, 0, expectFields(wantFields), 1, wantEndErrors(ErrLocalWrite, io.ErrClosedPipe)},
+		{"local and broker failures", fields, nil, brokenOutput{}, 0, func(s *mockSender) { s.err = cause }, 1, wantEndErrors(ErrLocalWrite, cause)},
+		{"sender failure", fields, nil, io.Discard, 0, func(s *mockSender) { s.err = cause }, 1, func(t *testing.T, err error) { t.Helper(); require.ErrorIs(t, err, cause) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			sender := &mockSender{
-				t:          t,
-				wantFields: test.wantFields,
+			sender := &mockSender{t: t}
+			tc.setup(sender)
+
+			e := &event{logger: newLogger(tc.output), sender: sender, deliveryTimeout: tc.timeout, err: tc.cause, stash: Stash{fields: make(map[fieldID]internal.Field)}}
+			for _, f := range tc.fields {
+				e.Append(f)
 			}
 
-			test.event.sender = sender
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
 
-			err := test.event.End(t.Context())
-			require.NoError(t, err)
+			err := e.End(ctx)
+			tc.want(t, err)
 
-			require.Equal(t, test.expected, sender.sendCalls)
+			require.Equal(t, tc.calls, sender.sendCalls)
 		})
 	}
 }
@@ -386,18 +318,60 @@ func TestEvent_shouldSend(t *testing.T) {
 	}
 }
 
+func wantEndErrors(expected ...error) func(*testing.T, error) {
+	return func(t *testing.T, err error) {
+		t.Helper()
+
+		for _, cause := range expected {
+			require.ErrorIs(t, err, cause)
+		}
+	}
+}
+
 type mockSender struct {
-	t          *testing.T
-	sendCalls  int
-	wantFields map[fieldID]any
+	sent         map[fieldID]any
+	err          error
+	checkContext func(context.Context)
+	t            *testing.T
+	sendCalls    int
+	wantFields   map[fieldID]any
 }
 
 func (ms *mockSender) Send(ctx context.Context, fields map[fieldID]any) error {
+	ms.sent = fields
 	ms.sendCalls++
+
+	if ms.checkContext != nil {
+		ms.checkContext(ctx)
+	}
 
 	if ms.wantFields != nil {
 		require.Equal(ms.t, ms.wantFields, fields)
 	}
 
-	return nil
+	return ms.err
+}
+
+// brokenOutput позволяет проверить ошибку самой локальной записи.
+type brokenOutput struct{}
+
+func (brokenOutput) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestLog(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		writer io.Writer
+		want   error
+	}{
+		{"written", io.Discard, nil}, {"writer unavailable", brokenOutput{}, ErrLocalWrite},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := event{logger: newLogger(tc.writer)}
+			require.ErrorIs(t, e.log(t.Context()), tc.want)
+		})
+	}
 }

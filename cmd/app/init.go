@@ -36,22 +36,22 @@ func initAuditor(cfg config.AuditConfig, sender audit.Sender) *audit.Auditor {
 	logrus.Info("initializing error event builder")
 
 	return audit.NewAuditor(
-		audit.WithHook(auth.TokenValidationFailedHook),
+
 		audit.WithHook(handlerV0.ConnectionHook),
-		audit.WithHook(politics.FilterNotesFailedHook),
-		audit.WithHook(user.GetUserIDByTelegramIDHook),
+
 		audit.WithIncludeLevels(cfg.Levels.Include),
 		audit.WithExcludeLevels(cfg.Levels.Exclude),
 		audit.WithIncludeKinds(cfg.Kinds.Include),
 		audit.WithExcludeKinds(cfg.Kinds.Exclude),
 		audit.WithSender(sender),
+		audit.WithDeliveryTimeout(cfg.DeliveryTimeout),
 	)
 }
 
-func initUserService(storage *repo.Repo, cache *redis.Service, cfg config.Auth, auditor *audit.Auditor) *user.Service {
+func initUserService(storage *repo.Repo, cache *redis.Service, cfg config.Auth) *user.Service {
 	logrus.Info("initializing user service")
 
-	return start(user.New(user.WithStorage(storage), user.WithCache(cache), user.WithCacheTTL(cfg.UserCacheTTL), user.WithAuditor(auditor)))
+	return start(user.New(user.WithStorage(storage), user.WithCache(cache), user.WithCacheTTL(cfg.UserCacheTTL)))
 }
 
 func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
@@ -72,7 +72,7 @@ func initPostgresStorage(ctx context.Context, cfg config.Postgres) *repo.Repo {
 	))
 }
 
-func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissionResolver, spaceChecker *access.SpaceAccessChecker, auditor *audit.Auditor) *politics.Service {
+func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissionResolver, spaceChecker *access.SpaceAccessChecker) *politics.Service {
 	logrus.Info("initializing politics service")
 
 	return start(
@@ -80,12 +80,11 @@ func initPoliticsService(storage *repo.Repo, resolver *permissions.NotePermissio
 			politics.WithStorage(storage),
 			politics.WithNotePermissionResolver(resolver),
 			politics.WithSpaceAccessChecker(spaceChecker),
-			politics.WithAuditor(auditor),
 		),
 	)
 }
 
-func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.Repo, auditor *audit.Auditor) *auth.Service {
+func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.Repo) *auth.Service {
 	logrus.WithFields(logrus.Fields{
 		"update_key_interval": cfg.UpdateKeyInterval,
 		"issuer":              cfg.Issuer,
@@ -100,7 +99,6 @@ func initAuthService(vaultClient *vault.Client, cfg config.Auth, storage *repo.R
 			auth.WithTokenDuration(cfg.TokenDuration),
 			auth.WithVaultClient(vaultClient),
 			auth.WithStorage(storage),
-			auth.WithAuditor(auditor),
 		),
 	)
 }
@@ -155,12 +153,14 @@ func initHandlerV0(buildInfo *BuildInfo, notes *handlerV0.NotesHandler, auth *ha
 	)
 }
 
-func initMiddlewareHandler(authSvc handlerV0.AuthService) *handlerV0.MiddlewareHandler {
+func initMiddlewareHandler(authSvc handlerV0.AuthService, auditor *audit.Auditor) *handlerV0.MiddlewareHandler {
 	logrus.Info("initializing middleware handler")
 
 	return start(
 		handlerV0.NewMiddlewareHandler(
 			handlerV0.WithMiddlewareAuthService(authSvc),
+
+			handlerV0.WithRequestAuditor(auditor),
 		),
 	)
 }
@@ -266,7 +266,7 @@ func initSender(cfg config.AuditConfig, rabbitMQ *rabbitmq.Client) audit.Sender 
 	))
 }
 
-func initFGAClient(cfg config.OpenFGA, auditor *audit.Auditor, userRepo *repo.Repo) *fga.Client {
+func initFGAClient(cfg config.OpenFGA, userRepo *repo.Repo) *fga.Client {
 	logrus.WithFields(logrus.Fields{
 		"api_url":              cfg.APIURL,
 		"store_id":             cfg.StoreID,
@@ -280,7 +280,6 @@ func initFGAClient(cfg config.OpenFGA, auditor *audit.Auditor, userRepo *repo.Re
 		fga.WithStoreID(cfg.StoreID),
 		fga.WithStoreName(cfg.StoreName),
 		fga.WithApplyModelOnStart(cfg.ApplyModelOnStart),
-		fga.WithAuditor(auditor),
 		fga.WithUserRepo(userRepo),
 	))
 }

@@ -1,20 +1,25 @@
 package v0
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
 	"auth-service/internal/api/v0/mocks"
 	"auth-service/internal/model"
 	"auth-service/internal/service"
-	"bytes"
-	"encoding/json"
-	"errors"
-	"net/http"
-	"net/http/httptest"
-	"testing"
+	"auth-service/internal/storage"
+	"auth-service/pkg/audit"
 
 	"github.com/golang/mock/gomock"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,247 +107,162 @@ func TestNewNotesHandler(t *testing.T) {
 	}
 }
 
-//nolint:funlen // длинный тест
-func TestNotesHandler_FilterNotes(t *testing.T) {
+func TestFilterNotes(t *testing.T) {
 	t.Parallel()
 
-	type wantResponse struct {
-		status int
-		errMsg string
-		resp   *model.FilterNotesResponse
+	space, user := uuid.New(), uuid.New()
+	noteIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	request := model.FilterNotesRequest{SpaceID: space, NoteIDs: noteIDs}
+	verified := model.FilterNotesRequest{SpaceID: space, NoteIDs: noteIDs, UserID: user}
+	notes := map[uuid.UUID]model.NoteAccessInfo{
+		noteIDs[0]: {CanRead: true, CanEdit: true},
+		noteIDs[1]: {CanRead: true, CanEdit: false},
 	}
 
-	spaceID := uuid.New()
-	tgID := "1234567890"
-	userID := uuid.New()
+	const telegramID = "1234567890"
 
-	note1 := uuid.New()
-	note2 := uuid.New()
+	withAudit := (*MiddlewareHandler).AuditNotesFilter
 
-	noteIDs := []uuid.UUID{note1, note2}
-
-	tests := []struct {
+	noMocks := func(*mocks.MockPoliticsService, *mocks.MockuserService) {}
+	for _, tc := range []struct {
 		name         string
+		audit        func(*MiddlewareHandler, echo.HandlerFunc) echo.HandlerFunc
 		body         any
-		userID       string
-		prepareMocks func(m *mocks.MockPoliticsService, u *mocks.MockuserService)
-		checkWant    func(actual wantResponse)
+		telegramID   string
+		prepareMocks func(*mocks.MockPoliticsService, *mocks.MockuserService)
+		status       int
+		wantLog      string
+		response     any
 	}{
-		{
-			name: "positive case: notes filtered successfully",
-			body: model.FilterNotesRequest{
-				SpaceID: spaceID,
-				NoteIDs: noteIDs,
-			},
-			userID: tgID,
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-
-				u.EXPECT().
-					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
-					Return(userID, nil)
-
-				m.EXPECT().
-					FilterNotes(gomock.Any(), gomock.Any()).
-					Return(map[uuid.UUID]model.NoteAccessInfo{
-						note1: {CanRead: true, CanEdit: true},
-						note2: {CanRead: true, CanEdit: false},
-					}, nil)
-			},
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusOK, actual.status)
-				assert.Equal(t, "", actual.errMsg)
-				assert.Equal(t, &model.FilterNotesResponse{
-					Notes: map[uuid.UUID]model.NoteAccessInfo{
-						note1: {CanRead: true, CanEdit: true},
-						note2: {CanRead: true, CanEdit: false},
-					},
-				}, actual.resp)
-			},
-		},
-		{
-			name: "bad request: empty note id list",
-			body: model.FilterNotesRequest{
-				SpaceID: spaceID,
-				NoteIDs: []uuid.UUID{},
-			},
-			userID: tgID,
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-			},
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusBadRequest, actual.status)
-				assert.Equal(t, "empty note id list", actual.errMsg)
-			},
-		},
-		{
-			name: "bad request: empty space id",
-			body: model.FilterNotesRequest{
-				SpaceID: uuid.UUID{},
-				NoteIDs: noteIDs,
-			},
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-			},
-			userID: tgID,
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusBadRequest, actual.status)
-				assert.Equal(t, "empty space id", actual.errMsg)
-			},
-		},
-		{
-			name: "unauthorized: no user in context",
-			body: model.FilterNotesRequest{
-				SpaceID: spaceID,
-				NoteIDs: noteIDs,
-			},
-			userID: "",
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-			},
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusUnauthorized, actual.status)
-				assert.Equal(t, "no user in context", actual.errMsg)
-			},
-		},
-		{
-			name: "forbidden: user is not member",
-			body: model.FilterNotesRequest{
-				SpaceID: spaceID,
-				NoteIDs: noteIDs,
-			},
-			userID: tgID,
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-
-				u.EXPECT().
-					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
-					Return(userID, nil)
-
-				m.EXPECT().
-					FilterNotes(gomock.Any(), gomock.Any()).
-					Return(nil, service.ErrUserNotMember)
-			},
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusForbidden, actual.status)
-				assert.Equal(t, service.ErrUserNotMember.Error(), actual.errMsg)
-			},
-		},
-		{
-			name: "internal error: service error",
-			body: model.FilterNotesRequest{
-				SpaceID: spaceID,
-				NoteIDs: noteIDs,
-			},
-			userID: tgID,
-			prepareMocks: func(m *mocks.MockPoliticsService, u *mocks.MockuserService) {
-				t.Helper()
-
-				u.EXPECT().
-					GetUserIDByTelegramID(gomock.Any(), gomock.Any()).
-					Return(userID, nil)
-
-				m.EXPECT().
-					FilterNotes(gomock.Any(), gomock.Any()).
-					Return(nil, errors.New("service error"))
-			},
-			checkWant: func(actual wantResponse) {
-				assert.Equal(t, http.StatusInternalServerError, actual.status)
-				assert.Equal(t, "internal server error", actual.errMsg)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
+		{"missing audit", withoutRequestAudit, request, telegramID, noMocks, http.StatusInternalServerError, "", map[string]string{"error": audit.ErrMissingAttempt.Error()}},
+		{"filtered notes", withAudit, request, telegramID, expectNotesFilter(telegramID, user, verified, notes, nil), http.StatusOK, "level=info", model.FilterNotesResponse{Notes: notes}},
+		{"invalid JSON field type", withAudit, "invalid object", telegramID, noMocks, http.StatusBadRequest, "level=debug", map[string]string{"error": "cannot bind request"}},
+		{"empty note IDs", withAudit, model.FilterNotesRequest{SpaceID: space}, telegramID, noMocks, http.StatusBadRequest, "level=debug", map[string]string{"error": "empty note id list"}},
+		{"missing space ID", withAudit, model.FilterNotesRequest{NoteIDs: noteIDs}, telegramID, noMocks, http.StatusBadRequest, "level=debug", map[string]string{"error": "empty space id"}},
+		{"missing Telegram identity", withAudit, request, "", noMocks, http.StatusUnauthorized, "level=warn", map[string]string{"error": "no user in context"}},
+		{"unknown Telegram user", withAudit, request, telegramID, failedNotesLookup(telegramID, fmt.Errorf("lookup: %w", storage.ErrNotFound)), http.StatusUnauthorized, "level=error", map[string]string{"error": "user not found"}},
+		{"identity store failure", withAudit, request, telegramID, failedNotesLookup(telegramID, errors.New("private database error")), http.StatusInternalServerError, "level=error", map[string]string{"error": "internal server error"}},
+		{"not a member", withAudit, request, telegramID, expectNotesFilter(telegramID, user, verified, nil, service.ErrUserNotMember), http.StatusForbidden, "level=warn", map[string]string{"error": service.ErrUserNotMember.Error()}},
+		{"filter failure", withAudit, request, telegramID, expectNotesFilter(telegramID, user, verified, nil, errors.New("private policy error")), http.StatusInternalServerError, "level=warn", map[string]string{"error": "internal server error"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			politicsService := mocks.NewMockPoliticsService(ctrl)
-			userService := mocks.NewMockuserService(ctrl)
-			tt.prepareMocks(politicsService, userService)
-
-			notesHandler, err := NewNotesHandler(
-				WithPoliticsService(politicsService),
-				WithUserService(userService),
-			)
+			politics, users := mocks.NewMockPoliticsService(ctrl), mocks.NewMockuserService(ctrl)
+			tc.prepareMocks(politics, users)
+			h, err := NewNotesHandler(WithPoliticsService(politics), WithUserService(users))
 			require.NoError(t, err)
-
-			e := echo.New()
-
-			bodyBytes, err := json.Marshal(tt.body)
-			require.NoError(t, err)
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/notes/filter", bytes.NewReader(bodyBytes))
-			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-
-			ctx := withUserID(req.Context(), tt.userID)
-
-			req = req.WithContext(ctx)
 
 			rec := httptest.NewRecorder()
-			c := e.NewContext(req, rec)
+			c := notesRequestContext(t, tc.telegramID, tc.body, rec)
 
-			err = notesHandler.FilterNotes(c)
+			var output bytes.Buffer
+
+			mw := &MiddlewareHandler{requestAuditor: audit.NewAuditor(audit.WithOutput(&output))}
+			err = tc.audit(mw, h.FilterNotes)(c)
 			require.NoError(t, err)
-
-			body := rec.Body.Bytes()
-
-			// Пытаемся распарсить ошибку (если она есть).
-			var errResp map[string]string
-
-			_ = json.Unmarshal(body, &errResp)
-
-			resp := &model.FilterNotesResponse{
-				Notes: nil,
-			}
-
-			err = json.Unmarshal(body, &resp)
-			require.NoError(t, err)
-
-			actual := wantResponse{
-				status: rec.Code,
-				errMsg: errResp["error"],
-				resp:   resp,
-			}
-
-			tt.checkWant(actual)
+			requireNotesResponse(t, rec, tc.status, tc.response)
+			require.Contains(t, output.String(), tc.wantLog)
+			require.NotContains(t, output.String(), "private")
 		})
 	}
+}
+
+func requireNotesResponse(t *testing.T, rec *httptest.ResponseRecorder, status int, response any) {
+	t.Helper()
+
+	require.Equal(t, status, rec.Code)
+
+	expected, err := json.Marshal(response)
+	require.NoError(t, err)
+
+	require.JSONEq(t, string(expected), rec.Body.String())
+}
+
+func expectNotesFilter(telegramID string, user uuid.UUID, verified model.FilterNotesRequest, result map[uuid.UUID]model.NoteAccessInfo, err error) func(*mocks.MockPoliticsService, *mocks.MockuserService) {
+	return func(politics *mocks.MockPoliticsService, users *mocks.MockuserService) {
+		gomock.InOrder(
+			users.EXPECT().GetUserIDByTelegramID(gomock.Any(), telegramID).Return(user, nil),
+			politics.EXPECT().FilterNotes(gomock.Any(), verified).Return(result, err),
+		)
+	}
+}
+
+func failedNotesLookup(telegramID string, err error) func(*mocks.MockPoliticsService, *mocks.MockuserService) {
+	return func(politics *mocks.MockPoliticsService, users *mocks.MockuserService) {
+		users.EXPECT().GetUserIDByTelegramID(gomock.Any(), telegramID).Return(uuid.Nil, err)
+		politics.EXPECT().FilterNotes(gomock.Any(), gomock.Any()).Times(0)
+	}
+}
+
+func notesRequestContext(t *testing.T, telegramID string, body any, rec *httptest.ResponseRecorder) echo.Context {
+	t.Helper()
+
+	data, err := json.Marshal(body)
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(withUserID(t.Context(), telegramID), http.MethodPost, "/api/v0/auth/notes/filter", bytes.NewReader(data))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+	return echo.New().NewContext(req, rec)
 }
 
 func TestUserIDFromContext(t *testing.T) {
 	t.Parallel()
 
-	ctx := withUserID(t.Context(), "123")
-	id, ok := userIDFromContext(ctx)
-	assert.True(t, ok)
-	assert.Equal(t, "123", id)
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want string
+		ok   bool
+	}{
+		{"stored identity", withUserID(t.Context(), "123"), "123", true},
+		{"stored empty string", withUserID(t.Context(), ""), "", true},
+		{"missing identity", t.Context(), "", false},
+		{"unexpected identity type", context.WithValue(t.Context(), userIDKey{}, 123), "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	ctx = t.Context()
-	id, ok = userIDFromContext(ctx)
-	assert.False(t, ok)
-	assert.Equal(t, "", id)
+			id, ok := userIDFromContext(tc.ctx)
+
+			require.Equal(t, tc.ok, ok)
+			require.Equal(t, tc.want, id)
+		})
+	}
 }
 
-func TestParseUserID(t *testing.T) {
+func TestBindFilterNotes(t *testing.T) {
 	t.Parallel()
 
-	id := parseUserID("123")
-	assert.Equal(t, "123", id)
+	id, space := uuid.New(), uuid.New()
 
-	id = parseUserID(123)
-	assert.Equal(t, "", id)
-}
+	wantError := func(message string) require.ErrorAssertionFunc {
+		return func(t require.TestingT, err error, _ ...any) {
+			require.ErrorContains(t, err, message)
+		}
+	}
 
-func TestWithUserID(t *testing.T) {
-	t.Parallel()
+	for _, tt := range []struct {
+		name, body string
+		want       model.FilterNotesRequest
+		wantErr    require.ErrorAssertionFunc
+	}{
+		{"invalid JSON", "{", model.FilterNotesRequest{}, wantError("cannot bind request")},
+		{"missing notes", "{}", model.FilterNotesRequest{}, wantError("empty note id list")},
+		{"missing space", fmt.Sprintf(`{"note_ids":[%q]}`, id), model.FilterNotesRequest{NoteIDs: []uuid.UUID{id}}, wantError("empty space id")},
+		{"valid", fmt.Sprintf(`{"note_ids":[%q],"space_id":%q}`, id, space), model.FilterNotesRequest{NoteIDs: []uuid.UUID{id}, SpaceID: space}, require.NoError},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	ctx := withUserID(t.Context(), "123")
-	id, ok := userIDFromContext(ctx)
-	assert.True(t, ok)
-	assert.Equal(t, "123", id)
+			r := httptest.NewRequestWithContext(t.Context(), "POST", "/", strings.NewReader(tt.body))
+			r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+
+			req, err := bindFilterNotes(echo.New().NewContext(r, httptest.NewRecorder()))
+			tt.wantErr(t, err)
+
+			require.Equal(t, tt.want, req)
+		})
+	}
 }
