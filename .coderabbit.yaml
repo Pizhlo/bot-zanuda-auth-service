@@ -1,8 +1,274 @@
-language: "ru-RU"
+language: ru-RU
+early_access: false
+
+tone_instructions: >
+  Be strict, precise and constructive. Prioritize correctness,
+  security and reliability over style. Explain concrete failure
+  scenarios. Avoid speculative findings and generic praise.
+
 reviews:
-  profile: "chill"
+  profile: assertive
+
   high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  changed_files_summary: true
+  collapse_walkthrough: true
+  review_status: true
+  review_info: true
+  review_details: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  enable_prompt_for_ai_agents: true
+
+  auto_approvals:
+    enabled: false
+
   auto_review:
     enabled: true
+    auto_incremental_review: false
     drafts: false
-    base_branches: [".*"]
+
+  merge_risk_instructions: |
+    This repository implements authentication and authorization.
+
+    Consider changes high risk when they affect:
+    - Authentication, JWT validation or session management.
+    - Authorization rules, RBAC or OpenFGA integration.
+    - Administrator privileges and bootstrap procedures.
+    - Vault integration and secret rotation.
+    - Database migrations involving users, roles or permissions.
+    - Security-sensitive configuration or public endpoints.
+
+    Changes that allow privilege escalation, unauthorized access,
+    authentication bypass or irreversible data loss are critical.
+
+    Documentation-only changes are generally low risk.
+
+  # Keep handwritten source code, tests and migrations.
+  # Exclude only generated or temporary artifacts.
+  path_filters:
+    - "!**/*.generated.go"
+    - "!**/coverage/**"
+    - "!**/test-results/**"
+
+  path_instructions:
+    # General Go review.
+    - path: "**/*.go"
+      instructions: |
+        Review for correctness, security and maintainability.
+
+        Check:
+        - Error handling and propagation.
+        - Nil pointers, typed nil interfaces and zero values.
+        - Goroutine leaks, data races and deadlocks.
+        - Context propagation and cancellation.
+        - Resource ownership and cleanup.
+        - Unsafe shared mutable state.
+        - Incorrect handling of partial failures.
+        - Idempotency and retry safety.
+        - API and interface compatibility.
+        - Unnecessary complexity and abstractions.
+
+        Prefer simple, idiomatic Go.
+
+        Do not suggest abstractions without a concrete benefit.
+
+        For every finding:
+        - Verify the problem against surrounding code.
+        - Explain a realistic failure scenario.
+        - Describe the impact.
+        - Suggest a minimal correction.
+
+        Avoid duplicate linter findings and subjective style advice.
+
+    # Authentication and sessions.
+    - path: "**/*.go"
+      instructions: |
+        For authentication-related changes, check:
+        - JWT signature and algorithm validation.
+        - Token expiration and not-before validation.
+        - Issuer and audience checks when required.
+        - Access and refresh token separation.
+        - Refresh token rotation and replay protection.
+        - Token revocation and logout semantics.
+        - Secure session invalidation.
+        - Authentication bypass through missing checks.
+        - Leakage of tokens or credentials into logs.
+        - Timing-sensitive comparisons where applicable.
+
+        Do not assume a vulnerability exists solely because
+        an optional mechanism is absent.
+
+        Verify the actual authentication design and threat model.
+
+    # Authorization and access control.
+    - path: "**/*.go"
+      instructions: |
+        For authorization-related changes, check:
+        - Missing permission checks at trust boundaries.
+        - Privilege escalation and unauthorized role changes.
+        - Confusion between authentication and authorization.
+        - Incorrect resource ownership validation.
+        - Access to another user's resources.
+        - Failure to enforce administrative privileges.
+        - Inconsistent enforcement between endpoints.
+        - Unsafe defaults when authorization fails.
+        - Time-of-check/time-of-use problems.
+
+        For OpenFGA integration:
+        - Verify correct subject, relation and object.
+        - Check authorization model compatibility.
+        - Check behavior when OpenFGA is unavailable.
+        - Detect incorrect caching of permissions.
+        - Check consistency of permission updates.
+        - Avoid silently allowing access on errors.
+
+        Report only reachable and demonstrable problems.
+
+    # Vault and administrator bootstrap.
+    - path: "**/*.go"
+      instructions: |
+        When reviewing Vault or administrator bootstrap code:
+        - Check safe handling of secrets and tokens.
+        - Avoid logging credentials or sensitive responses.
+        - Check Vault errors, timeouts and cancellation.
+        - Detect unsafe fallbacks and hardcoded secrets.
+        - Verify initialization is idempotent.
+        - Check concurrent service startup.
+        - Prevent accidental creation of extra super-admins.
+        - Check administrator ID rotation behavior.
+        - Detect privilege escalation during account replacement.
+        - Avoid overwriting valid configuration unexpectedly.
+
+        Do not assume that startup initialization should be
+        a separate CLI command.
+
+        Evaluate the existing startup architecture.
+
+    # Database access and transactions.
+    - path: "**/*.go"
+      instructions: |
+        For database-related changes, check:
+        - Proper transaction commit and rollback.
+        - Handling of unique constraint violations.
+        - Concurrent writes and lost updates.
+        - Incorrect transaction isolation assumptions.
+        - SQL injection and unsafe query construction.
+        - Correct use of parameterized queries.
+        - Context cancellation and query timeouts.
+        - Connection and row cleanup.
+        - Handling of sql.ErrNoRows.
+        - Atomicity of multi-step operations.
+        - Idempotent retries.
+        - Data integrity after partial failures.
+
+        Recommend indexes only with a concrete justification.
+
+    # Go unit and integration tests.
+    - path: "**/*_test.go"
+      instructions: |
+        Review tests for correctness and reliability.
+
+        Check:
+        - Relevant success and failure scenarios.
+        - Boundary conditions and nil inputs.
+        - Permission denial and authentication failures.
+        - Token expiration and revocation cases.
+        - Transaction failures and concurrent operations.
+        - Deterministic assertions and test isolation.
+        - Correct use of t.Context().
+        - Safe use of t.Parallel().
+        - Shared state and race conditions.
+        - Proper cleanup of test resources.
+        - Mock expectations matching actual behavior.
+
+        Project conventions:
+        - Prefer testify/require for assertions.
+        - Use require.Equal for exact comparisons.
+        - Use require.ErrorContains for error text checks.
+        - Use require.Eventually for asynchronous conditions.
+        - Avoid arbitrary sleeps in asynchronous tests.
+        - Configure mocks through expect callbacks
+          in table-driven test cases where appropriate.
+        - Avoid unnecessary duplication in test setup.
+
+        Never weaken assertions just to make tests pass.
+
+        Check that tests validate actual behavior rather
+        than implementation details.
+
+    # PostgreSQL migrations and queries.
+    - path: "**/*.sql"
+      instructions: |
+        Review SQL with emphasis on correctness and safety.
+
+        Check:
+        - Referential integrity and database constraints.
+        - Unique constraints and duplicate data handling.
+        - Safe schema migrations.
+        - Existing data compatibility.
+        - Transaction boundaries and atomicity.
+        - Concurrent execution and locking.
+        - Idempotency where required.
+        - Destructive changes and rollback safety.
+        - Correct authorization-related data updates.
+
+        For user, role and permission tables:
+        - Prevent accidental privilege escalation.
+        - Preserve existing authorization relationships.
+        - Check uniqueness and ownership invariants.
+
+        Do not recommend destructive migrations
+        without explaining their operational impact.
+
+    # API and service configuration.
+    - path: "**/*.{yaml,yml}"
+      instructions: |
+        Check:
+        - Correct environment variable propagation.
+        - Secret exposure and unsafe defaults.
+        - Authentication and authorization configuration.
+        - Incorrect service endpoints and dependencies.
+        - Inconsistent development and production settings.
+        - Incorrect network and port exposure.
+        - Missing required configuration.
+        - CI/CD permissions and secret handling.
+
+        Do not suggest hardcoding credentials.
+
+    # Container builds.
+    - path: "**/Dockerfile*"
+      instructions: |
+        Check:
+        - Build correctness and reproducibility.
+        - Secret leakage in build layers.
+        - Unnecessary runtime privileges.
+        - File permissions and ownership.
+        - Graceful shutdown and signal handling.
+        - Runtime dependency correctness.
+        - Production image security.
+
+    # Makefile and automation.
+    - path: "Makefile"
+      instructions: |
+        Check:
+        - Correct target dependencies.
+        - Environment variable export.
+        - Failure propagation.
+        - Shell quoting and expansion.
+        - Working directory assumptions.
+        - Test and lint command correctness.
+        - Idempotency of management commands.
+
+        Preserve existing make lint and make test workflows.
+
+    - path: "**/*.sh"
+      instructions: |
+        Check:
+        - Exit status handling.
+        - Unsafe shell interpolation.
+        - Proper quoting.
+        - Secret leakage.
+        - Cleanup after failures.
+        - Idempotent execution.
+        - Dangerous file operations.
