@@ -270,3 +270,25 @@ go test -race ./...
 ```
 
 Не дублируй проверки без необходимости и не запускай потенциально разрушительные интеграционные тесты против production.
+
+## 13. Конструктор сервиса и его зависимости
+
+Используй принятые в auth-service функциональные опции вместо позиционного набора зависимостей:
+
+```go
+type serviceOption func(*Service)
+
+func WithRepository(repo Repository) serviceOption {
+    return func(s *Service) { s.repo = repo }
+}
+
+func New(opts ...serviceOption) (*Service, error) {
+    s := &Service{}
+    for _, opt := range opts { opt(s) }
+    if s.repo == nil { return nil, errors.New("repository is required") }
+    return s, nil
+}
+```
+
+Вызывающий код явно указывает назначение каждой зависимости: `New(WithRepository(repo))`.
+DTO проверяет формат входных данных; проверки допустимости действия над ресурсом и назначения роли участнику выполняет сервис до обращения к хранилищам.

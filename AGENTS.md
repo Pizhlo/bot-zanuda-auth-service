@@ -220,14 +220,14 @@ Never log:
 - Test that conflicts do not call OpenFGA.
 - Use type-safe request and response models.
 - Validate all external request fields before external side effects.
-- Maintain at least 80% test coverage.
+- Maintain at least 80% statement coverage of production Go code. Use the exclusions and counting rules in `docs/codestyle/testing-guidelines.md`.
 
 ## Boundaries
 
 **MUST:**
 
 - Run `make lint` before committing.
-- Run relevant tests after changes.
+- Run unit tests and the separate component integration suite for changes to CLI, migrations, policies, persistence or adapters. Keep public API and cross-service scenarios in pytests. Delegate environment lifecycle to testkit.
 - Update `specs/auth-service/spec.md` and tests when changing the OpenFGA model, action mappings, request contracts, audit fields, idempotency behavior, or error contracts.
 - Keep authorization checks fail-closed.
 - Keep idempotency conflict handling fail-closed.
