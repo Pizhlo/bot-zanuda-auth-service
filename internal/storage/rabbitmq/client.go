@@ -3,6 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -21,10 +22,12 @@ type Client struct {
 	maxRetries     int
 	retryBackoff   time.Duration
 
-	mu      sync.Mutex
-	conn    *amqp091.Connection
-	channel *amqp091.Channel
-	topics  []string
+	lifecycle chan struct{} // Сериализует Run/Stop с отменой ожидания; Publish не ждёт.
+	mu        sync.RWMutex
+	transport net.Conn
+	conn      *amqp091.Connection
+	channel   *amqp091.Channel
+	topics    []string
 }
 
 // Option - опция для настройки клиента RabbitMQ.
@@ -58,7 +61,8 @@ func WithTopics(topics []string) Option {
 	}
 }
 
-// WithMaxRetries устанавливает максимальное количество попыток отправки сообщения в RabbitMQ.
+// WithMaxRetries задаёт число повторных попыток подключения после первой неудачи.
+// Publish не повторяет отправку: при потере ответа повтор мог бы дублировать событие.
 func WithMaxRetries(maxRetries int) Option {
 	return func(s *Client) {
 		s.maxRetries = maxRetries
@@ -88,31 +92,68 @@ func NewClient(opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("rabbitmq topics are required")
 	}
 
-	if s.connectTimeout == 0 {
+	if s.connectTimeout <= 0 {
 		return nil, fmt.Errorf("rabbitmq connect timeout is required")
 	}
 
-	if s.publishTimeout == 0 {
+	if s.publishTimeout <= 0 {
 		return nil, fmt.Errorf("rabbitmq publish timeout is required")
 	}
 
-	if s.maxRetries == 0 {
+	if s.maxRetries <= 0 {
 		return nil, fmt.Errorf("rabbitmq max retries is required")
 	}
 
-	if s.retryBackoff == 0 {
+	if s.retryBackoff <= 0 {
 		return nil, fmt.Errorf("rabbitmq retry backoff is required")
 	}
 
 	return s, nil
 }
 
-// Run создает соединение с RabbitMQ и декларирует очереди.
-func (s *Client) Run(ctx context.Context) error {
+// lockLifecycle ожидает право менять соединение, соблюдая общий бюджет Run/Stop.
+// Под mu только инициализируется семафор; ожидание выполняется вне блокировки состояния.
+func (s *Client) lockLifecycle(ctx context.Context) (func(), error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	if s.lifecycle == nil {
+		s.lifecycle = make(chan struct{}, 1)
+	}
 
-	if s.conn != nil && s.channel != nil && !s.channel.IsClosed() && !s.conn.IsClosed() {
+	lifecycle := s.lifecycle
+	s.mu.Unlock()
+
+	select {
+	case lifecycle <- struct{}{}:
+		release := func() { <-lifecycle }
+		if err := ctx.Err(); err != nil {
+			release()
+			return nil, err
+		}
+
+		return release, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Run подключается и объявляет очереди в пределах ConnectTimeout и контекста.
+// Повторы касаются только подключения; готовое состояние заменяется атомарно,
+// поэтому Publish не ждёт сетевого I/O или задержки между попытками.
+func (s *Client) Run(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, s.connectTimeout)
+	defer cancel()
+
+	release, err := s.lockLifecycle(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	s.mu.RLock()
+	connected := s.conn != nil && s.channel != nil && !s.channel.IsClosed() && !s.conn.IsClosed()
+	s.mu.RUnlock()
+
+	if connected {
 		return nil
 	}
 
@@ -124,54 +165,99 @@ func (s *Client) Run(ctx context.Context) error {
 		uint64(s.maxRetries),
 	)
 
-	var (
-		conn *amqp091.Connection
-		ch   *amqp091.Channel
-	)
+	var connection *brokerConnection
 
 	operation := func() error {
-		// Dial
-		c, err := amqp091.DialConfig(s.url, amqp091.Config{
-			Dial: amqp091.DefaultDial(s.connectTimeout),
-		})
-		if err != nil {
-			return fmt.Errorf("dial: %w", err)
-		}
+		var err error
 
-		// Channel
-		channel, err := c.Channel()
-		if err != nil {
-			_ = c.Close()
-			return fmt.Errorf("channel: %w", err)
-		}
+		connection, err = s.connect(ctx)
 
-		// Declare queues (active, idempotent)
-		if err := declareQueues(channel, s.topics); err != nil {
-			_ = channel.Close()
-			_ = c.Close()
-
-			return fmt.Errorf("declare queues: %w", err)
-		}
-
-		// Success
-		conn, ch = c, channel
-
-		return nil
+		return err
 	}
 
-	err := backoff.Retry(operation, bo)
-	if err != nil {
-		return fmt.Errorf("connect retries exhausted (%d attempts): %w", s.maxRetries, err)
+	if err := backoff.Retry(operation, backoff.WithContext(bo, ctx)); err != nil {
+		return fmt.Errorf("connect retries exhausted (%d retries): %w", s.maxRetries, err)
 	}
 
-	s.conn = conn
-	s.channel = ch
+	s.mu.Lock()
+	previous := s.transport
+	s.conn, s.channel, s.transport = connection.conn, connection.channel, connection.transport
+	s.mu.Unlock()
+
+	if previous != nil {
+		_ = previous.Close()
+	}
 
 	logrus.WithFields(logrus.Fields{
 		"topics": len(s.topics),
 	}).Info("rabbitmq connected")
 
 	return nil
+}
+
+// brokerConnection публикуется в состоянии Client только после объявления очередей.
+// До этого транспорт принадлежит connect и закрывается при любой ошибке или отмене.
+type brokerConnection struct {
+	conn      *amqp091.Connection
+	channel   *amqp091.Channel
+	transport net.Conn
+}
+
+func (s *Client) connect(ctx context.Context) (*brokerConnection, error) {
+	connection := &brokerConnection{}
+	stopCancellation := func() bool { return true }
+	succeeded := false
+
+	defer func() {
+		stopCancellation()
+
+		if !succeeded && connection.transport != nil {
+			_ = connection.transport.Close()
+		}
+	}()
+
+	conn, err := amqp091.DialConfig(s.url, amqp091.Config{
+		Dial: func(network, address string) (net.Conn, error) {
+			dialer := net.Dialer{Timeout: s.connectTimeout}
+
+			raw, err := dialer.DialContext(ctx, network, address)
+			if err == nil {
+				connection.transport = raw
+				stopCancellation = context.AfterFunc(ctx, func() { _ = raw.Close() })
+			}
+
+			return raw, err
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+
+	connection.conn = conn
+
+	channel, err := conn.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("channel: %w", err)
+	}
+
+	connection.channel = channel
+
+	if err := declareQueues(channel, s.topics); err != nil {
+		return nil, fmt.Errorf("declare RabbitMQ queues: %w", err)
+	}
+	// Отмену надо отключить до передачи владения: запущенный callback мог уже
+	// закрыть транспорт, даже если предыдущая проверка ctx.Err ещё была успешной.
+	if !stopCancellation() {
+		return nil, ctx.Err()
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	succeeded = true
+
+	return connection, nil
 }
 
 func declareQueues(channel *amqp091.Channel, topics []string) error {
@@ -189,47 +275,89 @@ func declareQueues(channel *amqp091.Channel, topics []string) error {
 	return nil
 }
 
-// Stop закрывает соединение с RabbitMQ.
-func (s *Client) Stop(_ context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// Stop сначала убирает соединение из доступного состояния, затем закрывает его.
+// Параллельный Publish получает ошибку вместо ожидания сетевого Close.
+func (s *Client) Stop(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, s.connectTimeout)
+	defer cancel()
 
-	if s.conn == nil && s.channel == nil {
+	release, err := s.lockLifecycle(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	s.mu.Lock()
+	conn, transport := s.conn, s.transport
+	s.conn, s.channel, s.transport = nil, nil, nil
+	s.mu.Unlock()
+
+	if conn == nil {
 		return nil
 	}
 
-	if err := s.conn.Close(); err != nil {
+	// Сетевой Close не удерживает mutex состояния: новые Publish сразу получают ошибку.
+	stop := context.AfterFunc(ctx, func() {
+		if transport != nil {
+			_ = transport.Close()
+		}
+	})
+	defer stop()
+
+	if err := conn.Close(); err != nil {
 		return fmt.Errorf("rabbitmq close connection: %w", err)
 	}
 
 	logrus.Info("rabbitmq client stopped")
 
-	s.conn = nil
-	s.channel = nil
-
 	return nil
 }
 
-// Publish отправляет сообщение в RabbitMQ.
+// Publish отправляет одно JSON-сообщение без повторов, в пределах PublishTimeout.
+// При отмене закрывается общий транспорт: другие текущие публикации тоже могут
+// завершиться ошибкой, а для восстановления соединения требуется Run.
 func (s *Client) Publish(ctx context.Context, topic string, data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	conn, ch, transport := s.conn, s.channel, s.transport
+	s.mu.RUnlock()
 
-	if s.conn == nil {
+	if conn == nil {
 		return fmt.Errorf("rabbitmq connection is not connected")
 	}
 
-	if s.channel == nil {
+	if ch == nil {
 		return fmt.Errorf("rabbitmq channel is not connected")
 	}
-
-	ch := s.channel
 
 	ctx, cancel := context.WithTimeout(ctx, s.publishTimeout)
 	defer cancel()
 
-	return ch.PublishWithContext(ctx, "", topic, false, false, amqp091.Publishing{
-		ContentType: "application/json",
-		Body:        data,
+	return publishWithCancellation(ctx, transport, func() error {
+		return ch.PublishWithContext(ctx, "", topic, false, false, amqp091.Publishing{
+			ContentType: "application/json", Body: data,
+		})
 	})
+}
+
+// SDK не прерывает начатый Publish по context. Закрытие транспорта освобождает
+// сетевую запись и ожидающие её публикации, не создавая фоновых зависших workers.
+func publishWithCancellation(ctx context.Context, transport net.Conn, publish func() error) error {
+	if transport == nil {
+		return fmt.Errorf("rabbitmq transport is not connected")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	stop := context.AfterFunc(ctx, func() { _ = transport.Close() })
+	defer stop()
+
+	err := publish()
+
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return err
 }

@@ -52,9 +52,9 @@ func (f fieldID) String() string {
 	case fieldTraceID:
 		return "trace_id"
 	case fieldRequestID:
-		return "request_id"
+		return KeyRequestID
 	case fieldUserID:
-		return "user_id"
+		return KeyUserID
 	case fieldStackTrace:
 		return "stack_trace"
 	case fieldContext:
@@ -66,7 +66,7 @@ func (f fieldID) String() string {
 	case fieldCause:
 		return "cause"
 	case fieldIPAddress:
-		return "ip_address"
+		return KeyIPAddress
 	case fieldOperation:
 		return "operation"
 	case fieldStatus:
@@ -95,9 +95,9 @@ func (f *fieldID) UnmarshalText(text []byte) error {
 		*f = fieldErrorCode
 	case "trace_id":
 		*f = fieldTraceID
-	case "request_id":
+	case KeyRequestID:
 		*f = fieldRequestID
-	case "user_id":
+	case KeyUserID:
 		*f = fieldUserID
 	case "stack_trace":
 		*f = fieldStackTrace
@@ -109,7 +109,7 @@ func (f *fieldID) UnmarshalText(text []byte) error {
 		*f = fieldKind
 	case "cause":
 		*f = fieldCause
-	case "ip_address":
+	case KeyIPAddress:
 		*f = fieldIPAddress
 	case "operation":
 		*f = fieldOperation
@@ -266,9 +266,17 @@ const (
 	ErrCodeWriteFailedDueToInvalidInput ErrorCode = "WRITE_FAILED_DUE_TO_INVALID_INPUT"
 	// ErrCodeResourceAlreadyExistsOrNotFound - код ошибки для случая, когда ресурс уже существует или не найден.
 	ErrCodeResourceAlreadyExistsOrNotFound ErrorCode = "RESOURCE_ALREADY_EXISTS_OR_NOT_FOUND"
-	ErrNoTuplesToWriteOrDelete             ErrorCode = "NO_TUPLES_TO_WRITE_OR_DELETE"
-	ErrInternalServerError                 ErrorCode = "INTERNAL_SERVER_ERROR"
+	// ErrCodeValidationFailed - код ошибки для случая, когда validation failed.
+	ErrCodeValidationFailed    ErrorCode = "VALIDATION_FAILED"
+	ErrNoTuplesToWriteOrDelete ErrorCode = "NO_TUPLES_TO_WRITE_OR_DELETE"
+	ErrInternalServerError     ErrorCode = "INTERNAL_SERVER_ERROR"
 )
+
+// ErrCodeRequestInterrupted обозначает остановку в HTTP-middleware до проверки токена.
+const ErrCodeRequestInterrupted ErrorCode = "request_interrupted"
+
+// MessageRequestInterrupted поясняет ранний отказ в событии аудита.
+const MessageRequestInterrupted = "Request ended before authentication"
 
 // ErrorCodeField создает новое поле кода ошибки.
 func ErrorCodeField(errorCode ErrorCode) internal.Field {
@@ -304,6 +312,25 @@ func stackTrace(stackTrace string) internal.Field {
 func IPAddress(ipAddress string) internal.Field {
 	return internal.NewField(fieldIPAddress, ipAddress)
 }
+
+// Имена полей пользовательского аудита, которые заполняют обработчики запросов.
+const (
+	KeyContextError         = "context_error"
+	KeyStage                = "stage"
+	KeyPanic                = "panic"
+	KeyResponseWriteFailed  = "response_write_failed"
+	KeyCaller               = "caller"
+	KeySubject              = "subject"
+	KeyAuthorizationModelID = "authorization_model_id"
+	KeyResult               = "result"
+	KeyRequestID            = "request_id"
+	KeyLocalWriteFailed     = "local_write_failed"
+	KeyUserID               = "user_id"
+	KeySpaceID              = "space_id"
+	KeyNoteIDs              = "note_ids"
+	KeyIPAddress            = "ip_address"
+	KeyUserAgent            = "user_agent"
+)
 
 // EventContext - контекст события.
 // Может хранить в себе любые данные: url, по которому пришел запрос, метод, uuid пользователя, etc.
@@ -398,7 +425,7 @@ func KindField(kind Kind) internal.Field {
 	return internal.NewField(fieldKind, kind)
 }
 
-func cause(cause error) internal.Field {
+func cause(cause string) internal.Field {
 	return internal.NewField(fieldCause, cause)
 }
 

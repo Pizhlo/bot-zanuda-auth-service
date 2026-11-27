@@ -1,42 +1,101 @@
+# Модель отвечает за доступ к объекту. Допустимые поля update отдельно проверяет Casbin.
+# Роли берутся только из сохранённых tuples; relation/is_admin из запроса прав не дают.
+# При создании note/reminder check выполняется на будущем родительском space.
 model
   schema 1.1
 
 type user
+  relations
+    # Связь user:U#has_personal_space@user:U означает, что U уже получил личное пространство.
+    # Синхронизация создаёт её вместе с владельцем и типом personal одним Write.
+    define has_personal_space: [user]
 
 type space
   relations
+    # Оба типа пространства записывают space:ID#created@user:* вместе с владельцем.
+    # При повторном создании того же ID общий ключ вызывает конфликт всей записи OpenFGA.
+    define created: [user:*]
+    # Иерархия ролей shared: owner > admin > editor > viewer.
+    # Admin управляет участниками, editor создаёт и редактирует записи, viewer читает.
+    # Удаление пространства и чужих записей, изменение имени остаются у owner.
     define owner: [user]
     define admin: [user] or owner
     define editor: [user] or admin
     define viewer: [user] or editor
 
-    define can_view: viewer
-    define can_create_note: editor
-    define can_create_reminder: editor
-    define can_manage_members: admin
-    define can_manage_space: owner
+    # При синхронизации записывается тип пространства, например space:A#shared@user:*.
+    # user:* означает, что ответ на вопрос о типе A одинаков для любого пользователя.
+    # Для чтения, изменения или удаления дополнительно требуется роль из правил can_* ниже.
+    # У личного A должна быть только связь personal, у общего — только shared.
+    # Если ни одной связи нет, тип ещё неизвестен. Если есть обе, данные противоречивы.
+    # В обоих случаях personal_only и shared_only пусты и все действия над A запрещены.
+    define personal: [user:*]
+    define shared: [user:*]
+    define personal_only: personal but not shared
+    define shared_only: shared but not personal
+    define known_type: personal_only or shared_only
+    define known_owner: owner and known_type
+    define shared_viewer: viewer and shared_only
+    define shared_editor: editor and shared_only
+
+    # Personal — встроенное хранилище. Его видит и наполняет только владелец;
+    # случайно сохранившиеся viewer/editor/admin не дают остальным доступа.
+    define can_view: known_owner or shared_viewer
+    define can_create_note: known_owner or shared_editor
+    define can_create_reminder: known_owner or shared_editor
+
+    # В personal нельзя менять состав участников или удалять само пространство.
+    # В shared admin может менять участников, в том числе собственную роль.
+    # Дополнительный check в сервисе запрещает менять участие владельца.
+    define can_manage_members: admin and shared_only
+    # can_manage_space позволяет владельцу менять имя и удалять записи внутри.
+    # Это не разрешение удалить пространство: для него используется can_delete.
+    define can_manage_space: known_owner
+    define can_delete: owner and shared_only
+
+    # Владелец записи сохраняет права в shared даже без отдельной роли в пространстве.
+    # В personal права владельца записи действуют только при совпадении с владельцем пространства.
+    define personal_owner: owner and personal_only
+    define can_access_owned_objects: shared_only or personal_owner
+
+    # Защитный запрет для дочерних объектов: чужое personal не должно стать доступным
+    # через второй shared-родитель. Сам OpenFGA не ограничивает число parent tuples.
+    # Например, note:N связана с personal-A и shared-B: участник B не получает
+    # доступ к личной записи A. Запрет защищает приватность, но не удаляет лишнюю связь.
+    define foreign_personal: personal but not owner
 
 type note
   relations
+    # Синхронизация связывает запись с её пространством и владельцем.
     define space: [space]
     define owner: [user]
+    # accessible_owner — владелец этой записи, которому родитель разрешает права автора.
+    # В shared автору достаточно связи owner у записи. В personal он также должен владеть пространством.
+    define accessible_owner: owner and can_access_owned_objects from space
+    define viewer: accessible_owner or can_view from space
+    define editor: accessible_owner or can_create_note from space
+    define blocked_by_personal: foreign_personal from space
 
-    define viewer: owner or can_view from space
-    define editor: owner or can_create_note from space
-
-    define can_view: viewer
-    define can_update: editor
-    define can_delete: owner or can_manage_space from space
+    # Читать/редактировать может владелец записи либо участник с соответствующей ролью.
+    # Удалять — владелец записи или пространства, но не произвольный editor/admin.
+    # Запрет чужого personal имеет приоритет даже при ошибочных нескольких родителях.
+    define can_view: viewer but not blocked_by_personal
+    define can_update: editor but not blocked_by_personal
+    define can_delete: (accessible_owner or can_manage_space from space) but not blocked_by_personal
 
 type reminder
   relations
+    # Наследование аналогично note. Stop разрешён тем же пользователям, что update;
+    # stop не удаляет напоминание и не принимает маску изменяемых полей.
     define space: [space]
     define owner: [user]
-
-    define viewer: owner or can_view from space
-    define editor: owner or can_create_reminder from space
-
-    define can_view: viewer
-    define can_update: editor
-    define can_delete: owner or can_manage_space from space
-    define can_stop: owner or editor
+    # accessible_owner — владелец этой записи, которому родитель разрешает права автора.
+    # В shared автору достаточно связи owner у записи. В personal он также должен владеть пространством.
+    define accessible_owner: owner and can_access_owned_objects from space
+    define viewer: accessible_owner or can_view from space
+    define editor: accessible_owner or can_create_reminder from space
+    define blocked_by_personal: foreign_personal from space
+    define can_view: viewer but not blocked_by_personal
+    define can_update: editor but not blocked_by_personal
+    define can_delete: (accessible_owner or can_manage_space from space) but not blocked_by_personal
+    define can_stop: editor but not blocked_by_personal

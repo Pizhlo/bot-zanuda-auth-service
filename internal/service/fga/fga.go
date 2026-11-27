@@ -2,7 +2,6 @@ package fga
 
 import (
 	"auth-service/internal/model"
-	"auth-service/internal/service/internal"
 	"auth-service/internal/storage"
 	"auth-service/pkg/audit"
 	"context"
@@ -10,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/openfga/language/pkg/go/transformer"
@@ -30,13 +31,9 @@ type Client struct {
 	storeID            string
 	storeName          string
 	modelID            string
+	requestTimeout     time.Duration
 	applyModelOnStart  bool
-	auditor            auditor
 	userRepo           userRepo
-}
-
-type auditor interface {
-	Create(ctx context.Context) audit.Event
 }
 
 //go:generate mockgen -source=fga.go -destination=mocks/user_repo_mock.go -package=mocks userRepo
@@ -54,6 +51,12 @@ func WithAPIURL(apiURL string) option {
 	return func(c *Client) {
 		c.apiURL = apiURL
 	}
+}
+
+// WithRequestTimeout задаёт загруженный из конфигурации бюджет обращений к OpenFGA.
+// Более ранний deadline вызывающего кода имеет приоритет.
+func WithRequestTimeout(timeout time.Duration) option {
+	return func(c *Client) { c.requestTimeout = timeout }
 }
 
 // WithAuthorizationModel устанавливает путь к файлу с моделью авторизации.
@@ -87,13 +90,6 @@ func WithApplyModelOnStart(apply bool) option {
 	}
 }
 
-// WithAuditor устанавливает сервис для логирования.
-func WithAuditor(auditor auditor) option {
-	return func(c *Client) {
-		c.auditor = auditor
-	}
-}
-
 // WithUserRepo устанавливает репозиторий пользователей.
 func WithUserRepo(userRepo userRepo) option {
 	return func(c *Client) {
@@ -121,12 +117,12 @@ func NewClient(opts ...option) (*Client, error) {
 		return nil, fmt.Errorf("fga: store id or store name is required")
 	}
 
-	if c.auditor == nil {
-		return nil, fmt.Errorf("fga: auditor is required")
-	}
-
 	if c.userRepo == nil {
 		return nil, fmt.Errorf("fga: user repo is required")
+	}
+
+	if c.requestTimeout <= 0 {
+		return nil, fmt.Errorf("fga: request timeout must be positive")
 	}
 
 	return c, nil
@@ -136,7 +132,8 @@ func NewClient(opts ...option) (*Client, error) {
 // Создает клиент OpenFGA, резолвит store и model.
 func (c *Client) Connect(ctx context.Context) error {
 	fgaClient, err := openFGAClient.NewSdkClient(&openFGAClient.ClientConfiguration{
-		ApiUrl: c.apiURL,
+		ApiUrl:     c.apiURL,
+		HTTPClient: &http.Client{Timeout: c.requestTimeout},
 	})
 	if err != nil {
 		return fmt.Errorf("fga: error creating client: %w", err)
@@ -246,6 +243,14 @@ func (c *Client) createStore(ctx context.Context) error {
 // Если applyModelOnStart = true, то применяет модель и устанавливает modelID.
 // Иначе читает последнюю модель авторизации и устанавливает modelID.
 func (c *Client) resolveModel(ctx context.Context) error {
+	if c.modelID != "" {
+		if c.applyModelOnStart {
+			return fmt.Errorf("model_id and apply_model_on_start are mutually exclusive")
+		}
+
+		return c.fgaClient.SetAuthorizationModelId(c.modelID)
+	}
+
 	if c.applyModelOnStart {
 		if err := c.applyModelAndSetModelID(ctx); err != nil {
 			return fmt.Errorf("fga: error applying model: %w", err)
@@ -351,37 +356,43 @@ func (c *Client) writeAuthorizationModel(ctx context.Context, body openfga.Write
 	return data, nil
 }
 
-// ErrResounceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
+// ErrResourceAlreadyExistsOrNotFound ошибка о том, что либо создаваемый ресурс уже существует, либо удаляемый - не найден.
 var (
-	ErrResounceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
+	ErrResourceAlreadyExistsOrNotFound = errors.New("new resource already exists or deleted resource not found")
 	ErrUserNotFound                    = errors.New("user not found")
+	ErrValidationFailed                = errors.New("validation failed")
 )
 
 const (
-	serviceName             = "fga"
-	operationUpdateResource = "update_resource"
+	// OperationUpdateResource связывает аудит HTTP-запроса и синхронизации в FGA.
+	OperationUpdateResource = "fga.update_resource"
+	stageIdentifyActor      = "identify_actor"
+	stageValidateResource   = "validate_resource"
+	stageSpacePrivacy       = "check_space_privacy"
+	stageMapTuples          = "map_tuples"
+	stageWriteTuples        = "write_tuples"
 )
 
 // UpdateResource обновляет ресурс в OpenFGA.
-// Если создаваемый ресурс уже существует или удаляемый ресурс не найден, возвращает ошибку ErrResounceAlreadyExistsOrNotFound.
+// Перед записью space проверяет неизменяемые тип/владельца и ограничения personal.
+// DecisionID используется для корреляции, а не как доказательство разрешения.
+// Конфликт tuples возвращает ErrResourceAlreadyExistsOrNotFound; сам по себе он
+// не гарантирует уникальность parent у записи или идемпотентность синхронизации.
 //
 //nolint:funlen // много строк из-за аудита
 func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceRequest) (model.UpdateResourceResponse, error) {
-	operationUpdateResourceName := fmt.Sprintf("%s.%s", serviceName, operationUpdateResource)
+	a := audit.Current(ctx, OperationUpdateResource)
+	if a == nil {
+		return model.UpdateResourceResponse{}, audit.ErrMissingAttempt
+	}
 
-	ctx = internal.WithOperation(ctx, operationUpdateResourceName)
-	ctx = internal.WithServiceName(ctx)
-
-	event := c.auditor.Create(ctx)
-	defer internal.WithPanicRecovery(ctx, event)()
-
-	event.Append(audit.RequestID(req.RequestID.String()))
+	a.Correlate(req.RequestID)
+	a.At(stageIdentifyActor)
 
 	userID, err := c.userRepo.GetUserIDByTelegramID(ctx, strconv.Itoa(req.TelegramID))
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
-			event.WithError(audit.ErrCodeUserNotFound, audit.KindValidation, err)
-			event.Append(audit.Level(audit.ErrLevelError))
+			a.Fail(audit.ErrCodeUserNotFound, audit.KindValidation, audit.ErrLevelError, "User is not registered", storage.ErrNotFound)
 
 			return model.UpdateResourceResponse{}, &DetailedError{
 				Err:   ErrUserNotFound,
@@ -389,8 +400,7 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 			}
 		}
 
-		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
-		event.Append(audit.Level(audit.ErrLevelError))
+		a.Fail(audit.ErrCodeServiceUnavailable, audit.KindInfra, audit.ErrLevelError, "Identity store is unavailable", nil)
 
 		return model.UpdateResourceResponse{}, &DetailedError{
 			Err:   fmt.Errorf("fga: error getting user id by telegram id: %w", err),
@@ -398,26 +408,50 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 		}
 	}
 
-	ctx = internal.WithUserID(ctx, userID.String())
+	a.Context(audit.EventContext{
+		audit.KeyUserID:  userID.String(),
+		audit.KeySubject: string(model.SubjectTypeUser) + ":" + userID.String(),
+	})
+	a.At(stageValidateResource)
 
 	if err := c.validateRequest(req); err != nil {
-		event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
-		event.Append(audit.Level(audit.ErrLevelDebug))
+		var reason error = err
+		if errors.Is(err, errInvalidResourceType) {
+			reason = errInvalidResourceType
+		}
+
+		a.Fail(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, audit.ErrLevelDebug, "Invalid resource update request", reason)
 
 		return model.UpdateResourceResponse{}, err
 	}
 
+	a.At(stageSpacePrivacy)
+
+	if err := c.guardSpace(ctx, req, userID); err != nil {
+		switch {
+		case errors.Is(err, ErrSpacePrivacy), errors.Is(err, ErrOwnerTypeInvalid), errors.Is(err, ErrResourceAlreadyExistsOrNotFound):
+			a.Fail(audit.ErrCodeValidationFailed, audit.KindValidation, audit.ErrLevelDebug, "Space privacy constraint rejected the update", err)
+		default:
+			a.Fail(audit.ErrCodeServiceUnavailable, audit.KindInfra, audit.ErrLevelError, "Could not read space relations", nil)
+		}
+
+		return model.UpdateResourceResponse{}, fmt.Errorf("guard space invariants: %w", err)
+	}
+
+	a.At(stageMapTuples)
+
 	fgaRequest, err := toOpenFGAWriteRequest(req)
 	if err != nil {
-		event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
-		event.Append(audit.Level(audit.ErrLevelError))
-
 		if errors.Is(err, ErrNoTuplesToWriteOrDelete) {
+			a.Fail(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, audit.ErrLevelError, "Could not map resource update to tuples", ErrNoTuplesToWriteOrDelete)
+
 			return model.UpdateResourceResponse{}, &DetailedError{
 				Err:   ErrNoTuplesToWriteOrDelete,
 				Value: nil,
 			}
 		}
+
+		a.Fail(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, audit.ErrLevelError, "Could not map resource update to tuples", nil)
 
 		return model.UpdateResourceResponse{}, &DetailedError{
 			Err:   fmt.Errorf("convert request to openfga tuples: %w", err),
@@ -427,30 +461,16 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 
 	writtenTuples, deletedTuples := toModelTuples(fgaRequest.Writes, fgaRequest.Deletes)
 
+	a.At(stageWriteTuples)
+
 	_, err = c.fgaClient.Write(ctx).Body(fgaRequest).Options(openFGAClient.ClientWriteOptions{
 		AuthorizationModelId: &c.modelID,
 	}).Execute()
 	if err != nil {
-		if fgaErr, ok := err.(openfga.FgaApiValidationError); ok {
-			if code := fgaErr.ResponseCode(); code == openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT {
-				event.WithError(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, err)
-				event.Append(audit.Level(audit.ErrLevelError))
-
-				return model.UpdateResourceResponse{}, &DetailedError{
-					Err:   ErrResounceAlreadyExistsOrNotFound,
-					Value: nil,
-				}
-			}
-		}
-
-		event.WithError(audit.ErrCodeServiceUnavailable, audit.KindInfra, err)
-		event.Append(audit.Level(audit.ErrLevelError))
-
-		return model.UpdateResourceResponse{}, &DetailedError{
-			Err:   fmt.Errorf("write tuples to openfga: %w", err),
-			Value: nil,
-		}
+		return model.UpdateResourceResponse{}, tupleWriteFailure(a, err)
 	}
+
+	a.Context(audit.EventContext{audit.KeyResult: model.ResultApplied, audit.KeyAuthorizationModelID: c.modelID})
 
 	return model.UpdateResourceResponse{
 		RequestID:      req.RequestID,
@@ -464,6 +484,28 @@ func (c *Client) UpdateResource(ctx context.Context, req model.UpdateResourceReq
 			AuthModelID: c.modelID,
 		},
 	}, nil
+}
+
+// tupleWriteFailure сохраняет публичный конфликт записи отдельно от сбоя транспорта.
+func tupleWriteFailure(a *audit.Attempt, err error) error {
+	validation, invalid := errors.AsType[openfga.FgaApiValidationError](err)
+	conflict, apiError := errors.AsType[openfga.FgaApiError](err)
+	duplicate := invalid && validation.ResponseCode() == openfga.ERRORCODE_WRITE_FAILED_DUE_TO_INVALID_INPUT
+	aborted := apiError && conflict.ResponseStatusCode() == http.StatusConflict && conflict.ResponseCode() == string(openfga.INTERNALERRORCODE_ABORTED)
+
+	if duplicate {
+		a.Fail(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, audit.ErrLevelError, "OpenFGA rejected the tuple changes", validation)
+		return &DetailedError{Err: ErrResourceAlreadyExistsOrNotFound}
+	}
+
+	if aborted {
+		a.Fail(audit.ErrCodeWriteFailedDueToInvalidInput, audit.KindValidation, audit.ErrLevelError, "OpenFGA rejected the tuple changes", ErrResourceAlreadyExistsOrNotFound)
+		return &DetailedError{Err: ErrResourceAlreadyExistsOrNotFound}
+	}
+
+	a.Fail(audit.ErrCodeServiceUnavailable, audit.KindInfra, audit.ErrLevelError, "Could not write tuples to OpenFGA", nil)
+
+	return &DetailedError{Err: fmt.Errorf("write tuples to openfga: %w", err)}
 }
 
 type DetailedError struct {
@@ -497,22 +539,23 @@ func (c *Client) validateRequest(req model.UpdateResourceRequest) *DetailedError
 		return c.validateSpaceRequest(req)
 	default:
 		return &DetailedError{
-			Err:   fmt.Errorf("invalid resource type: %s", req.Resource.Type),
+			Err:   fmt.Errorf("%w: %s", errInvalidResourceType, req.Resource.Type),
 			Value: req.Resource.Type,
 		}
 	}
 }
 
 var (
-	ErrOwnerRequired     = errors.New("owner is required")
-	ErrParentRequired    = errors.New("parent is required")
-	ErrChangeTypeInvalid = errors.New("change type is invalid")
-	ErrOperationInvalid  = errors.New("operation is invalid")
-	ErrEventTypeInvalid  = errors.New("event type is invalid")
-	ErrParentNotAllowed  = errors.New("parent is not allowed")
-	ErrResourceEmpty     = errors.New("resource is empty")
-	ErrOwnerTypeInvalid  = errors.New("owner type is invalid: must be user")
-	ErrParentTypeInvalid = errors.New("parent type is invalid: must be space")
+	errInvalidResourceType = errors.New("invalid resource type")
+	ErrOwnerRequired       = errors.New("owner is required")
+	ErrParentRequired      = errors.New("parent is required")
+	ErrChangeTypeInvalid   = errors.New("change type is invalid")
+	ErrOperationInvalid    = errors.New("operation is invalid")
+	ErrEventTypeInvalid    = errors.New("event type is invalid")
+	ErrParentNotAllowed    = errors.New("parent is not allowed")
+	ErrResourceEmpty       = errors.New("resource is empty")
+	ErrOwnerTypeInvalid    = errors.New("owner type is invalid: must be user")
+	ErrParentTypeInvalid   = errors.New("parent type is invalid: must be space")
 )
 
 // validateNoteRequest проверяет запрос на обновление заметки.
@@ -732,3 +775,7 @@ func checkEventType(operation model.Operation, originalEventType string, eventTy
 
 	return nil
 }
+
+// ModelID возвращает версию, выбранную при Connect для checks и writes.
+// Публикация новой latest в store не меняет версию уже работающего процесса.
+func (c *Client) ModelID() string { return c.modelID }

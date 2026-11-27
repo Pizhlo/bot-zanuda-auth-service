@@ -3,7 +3,11 @@ package audit
 import (
 	"auth-service/pkg/audit/internal"
 	"context"
+	"io"
 	"log/slog"
+
+	"github.com/sirupsen/logrus"
+	"time"
 )
 
 // Stash - структура для хранения полей события.
@@ -30,9 +34,10 @@ type EventHook func(ctx context.Context, stash Stash) Stash
 // Следит за всеми событиями и логирует их.
 // Сервисы интегрируют его себе через хуки и контекст.
 type Auditor struct {
-	hooks  []EventHook
-	logger *slog.Logger
-	sender Sender
+	deliveryTimeout time.Duration
+	hooks           []EventHook
+	logger          *slog.Logger
+	sender          Sender
 
 	// какие уровни отправлять в rabbitmq. если не заданы, то отправляются все уровни.
 	// если установлены и levels, и kinds, то событие будет отправлено только если оно соответствует обоим условиям.
@@ -53,6 +58,17 @@ type Auditor struct {
 
 // auditorOption - опция для создания аудитора.
 type auditorOption func(*Auditor)
+
+// WithDeliveryTimeout задаёт отдельный бюджет доставки после локальной записи,
+// в том числе когда вызывающий запрос уже отменён.
+func WithDeliveryTimeout(timeout time.Duration) auditorOption {
+	return func(a *Auditor) { a.deliveryTimeout = timeout }
+}
+
+// WithOutput задаёт вывод локального аудита, например stderr операторской утилиты.
+func WithOutput(out io.Writer) auditorOption {
+	return func(a *Auditor) { a.logger = newLogger(out) }
+}
 
 // WithHook добавляет новый хук в аудитор.
 func WithHook(hook EventHook) auditorOption {
@@ -105,6 +121,7 @@ type Sender interface {
 
 // Event - интерфейс события аудита.
 type Event interface {
+	End(context.Context) error
 	Append(field internal.Field)
 	AppendContext(context EventContext)
 	AppendError(err error)
@@ -127,13 +144,14 @@ func NewAuditor(opts ...auditorOption) *Auditor {
 
 // Create создает новое событие аудита.
 // Автоматически добавляет поле текущего времени и статус операции: started.
-func (a *Auditor) Create(ctx context.Context) Event {
+func (a *Auditor) Create(ctx context.Context) (Event, error) {
 	e := &event{
-		stash:  Stash{fields: make(map[fieldID]internal.Field)},
-		logger: a.logger,
-		sender: a.sender,
-		levels: a.levels,
-		kinds:  a.kinds,
+		deliveryTimeout: a.deliveryTimeout,
+		stash:           Stash{fields: make(map[fieldID]internal.Field)},
+		logger:          a.logger,
+		sender:          a.sender,
+		levels:          a.levels,
+		kinds:           a.kinds,
 	}
 
 	for _, hook := range a.hooks {
@@ -143,7 +161,16 @@ func (a *Auditor) Create(ctx context.Context) Event {
 	e.Append(currentTime())
 	e.Append(StatusField(StatusStarted))
 
-	e.log(ctx)
+	if err := e.log(ctx); err != nil {
+		diagnostic := logrus.WithField(KeyLocalWriteFailed, true)
+		if id, ok := e.stash.fields[fieldRequestID]; ok {
+			diagnostic = diagnostic.WithField(KeyRequestID, id.Value)
+		}
 
-	return e
+		diagnostic.Warn("failed to start audit event")
+
+		return nil, err
+	}
+
+	return e, nil
 }

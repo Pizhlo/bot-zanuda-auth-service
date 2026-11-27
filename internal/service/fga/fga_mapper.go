@@ -15,44 +15,63 @@ var ErrNoTuplesToWriteOrDelete = errors.New("no tuples to write or delete")
 
 // toOpenFGAWriteRequest преобразует запрос на обновление ресурса в запрос на запись tuples в OpenFGA.
 func toOpenFGAWriteRequest(req model.UpdateResourceRequest) (openFGAClient.ClientWriteRequest, error) {
-	writes, deletes, err := tuplesFromRequest(req)
+	writes, err := tuplesFromRequest(req)
 	if err != nil {
 		return openFGAClient.ClientWriteRequest{}, err
 	}
 
-	if len(writes) == 0 && len(deletes) == 0 {
+	if len(writes) == 0 {
 		return openFGAClient.ClientWriteRequest{}, ErrNoTuplesToWriteOrDelete
 	}
 
 	return openFGAClient.ClientWriteRequest{
-		Writes:  writes,
-		Deletes: deletes,
+		Writes: writes,
 	}, nil
 }
 
 // tuplesFromRequest формирует tuples для записи и удаления на основе типа операции в запросе.
-func tuplesFromRequest(req model.UpdateResourceRequest) (
-	[]openFGAClient.ClientTupleKey,
-	[]openFGAClient.ClientTupleKeyWithoutCondition,
-	error,
-) {
+func tuplesFromRequest(req model.UpdateResourceRequest) ([]openFGAClient.ClientTupleKey, error) {
 	switch req.Operation {
 	case model.OperationCreate:
-		return tuplesForCreate(req.Resource, req.Relations)
+		writes, err := tuplesForCreate(req.Resource, req.Relations)
+		if err != nil {
+			return nil, err
+		}
+
+		if req.Resource.Type == model.ResourceTypeSpace && req.ChangeType == model.ChangeTypeResourceAdded {
+			kind, ok := req.Resource.Attributes[model.AttributeSpaceType].(string)
+			if !ok || !model.SpaceKind(kind).Valid() {
+				return nil, ErrSpacePrivacy
+			}
+
+			object := formatObject(req.Resource)
+			writes = append(writes,
+				openFGAClient.ClientTupleKey{User: "user:*", Relation: model.RelationSpaceCreated, Object: object},
+				openFGAClient.ClientTupleKey{User: "user:*", Relation: kind, Object: object},
+			)
+
+			if model.SpaceKind(kind) == model.SpaceKindPersonal {
+				// Общая для всех личных пространств владельца отметка занимает место в той же транзакции.
+				owner := formatObject(req.Relations.Owner)
+				writes = append(writes, openFGAClient.ClientTupleKey{User: owner, Relation: model.RelationHasPersonalSpace, Object: owner})
+			}
+		}
+
+		return writes, nil
 	default:
-		return nil, nil, fmt.Errorf("unknown operation: %s", req.Operation)
+		return nil, fmt.Errorf("unknown operation: %s", req.Operation)
 	}
 }
 
 // tuplesForCreate формирует tuples для создания ресурса: owner и связь с родителем.
-func tuplesForCreate(resource model.Resource, rel model.Relation) ([]openFGAClient.ClientTupleKey, []openFGAClient.ClientTupleKeyWithoutCondition, error) {
+func tuplesForCreate(resource model.Resource, rel model.Relation) ([]openFGAClient.ClientTupleKey, error) {
 	object := formatObject(resource)
 	writes := make([]openFGAClient.ClientTupleKey, 0, 2)
 
 	if rel.Owner.ID != uuid.Nil {
 		writes = append(writes, openFGAClient.ClientTupleKey{
 			User:     formatObject(rel.Owner),
-			Relation: "owner",
+			Relation: string(model.RelationTypeOwner),
 			Object:   object,
 		})
 	}
@@ -60,13 +79,13 @@ func tuplesForCreate(resource model.Resource, rel model.Relation) ([]openFGAClie
 	if rel.Parent.ID != uuid.Nil {
 		tuple, err := parentWrites(resource, rel)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		writes = append(writes, tuple)
 	}
 
-	return writes, nil, nil
+	return writes, nil
 }
 
 // parentWrites формирует tuple, связывающий ресурс с родителем (например, note -> space).

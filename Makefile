@@ -22,7 +22,8 @@ mocks:
 # Сгенерировать Swagger-документацию из кода обработчиков.
 swag:
 	@echo "> generating swagger documentation..."
-	swag init -g cmd/app/main.go --md ./docs --parseInternal  --parseDependency --parseDepth 2 
+	$(GO) run github.com/swaggo/swag/cmd/swag@$(shell $(GO) list -m -f '{{.Version}}' github.com/swaggo/swag) init -g cmd/app/main.go --md ./docs --parseInternal --parseDependency --parseDepth 2
+	python3 scripts/close-decision-schemas.py docs
 	@echo "> swagger documentation generated successfully"
 
 # Установить линтеры и создать локальные сертификаты Vault.
@@ -157,10 +158,12 @@ lint:
 	$(GOLANGCI_LINT) run ./...
 	@echo "> linting successfully finished"
 
-# Запустить Go-тесты с проверкой гонок и покрытием.
+# Запустить unit-тесты с проверкой гонок и проверить покрытие рабочего Go-кода.
 test:
 	@echo "> testing..."
-	$(GO) test -cover -gcflags="-l" -race -v ./...
+	@mkdir -p "$(BUILD_DIR)"
+	$(GO) test -count=1 -gcflags="-l" -race -v -coverpkg=./... -coverprofile="$(BUILD_DIR)/coverage.out" ./...
+	python3 scripts/check-coverage.py "$(BUILD_DIR)/coverage.out" "$$($(GO) list -m)"
 	@echo "> successfully finished"
 
 # Последовательно проверить зависимости, стиль, тесты и сборку.
@@ -184,7 +187,9 @@ check-go-mod:
 	$(GO) mod verify
 	@echo "> go.mod checked successfully"
 
-# Проверить наличие требуемых тестовых файлов в пакетах.
+# В каждом пакете найти *_test.go и проверить, что рядом с каждым file_test.go есть file.go.
+# Нужен хотя бы один тестовый файл, кроме пакетов с main.go, каталогов mocks и docs
+# (включая их подкаталоги) и пакетов с обоснованием в .nocover.
 check-test-files:
 	@echo "> checking test files..."
 	./scripts/check-test-files.sh $$($(GO) list -f '{{.Dir}}' ./...)
@@ -354,6 +359,8 @@ PYTESTS_DIR ?= $(abspath $(CUR_DIR)/../pytests)
 export PYTESTS_DIR
 export INTEGRATION_ROOT := $(CUR_DIR)
 export INTEGRATION_CONTEXT := auth-service
+# Тестируем образ с моделью из той же версии auth-service.
+export AUTH_FGA_MODEL_FILE := $(CUR_DIR)/fga/auth-model.fga
 
 # integration-up: подготовить контейнерный стенд testkit; для IDE используйте containers-up.
 
@@ -377,3 +384,8 @@ export INTEGRATION_CONTEXT := auth-service
 # @ скрывает только саму команду make, вывод Python/pytest остаётся виден.
 integration-up integration-run integration-seed integration-test integration-down integration-logs integration-rabbitmq-setup:
 	@$(MAKE) -C "$(TESTKIT_DIR)" $@
+
+# Компонентные проверки с реальными зависимостями выполняются отдельно от unit/race.
+.PHONY: test-components
+test-components:
+	@bash scripts/test-components.sh

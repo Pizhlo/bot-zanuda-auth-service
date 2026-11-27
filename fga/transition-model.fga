@@ -1,0 +1,61 @@
+# Переходная модель для переноса накопленных данных. Утилита записывает типы пространств
+# и отметки владельцев. После сверки данных сервис запускают со строгой auth-model.fga.
+model
+  schema 1.1
+
+type user
+  relations
+    # Утилита добавляет user:U#has_personal_space@user:U для каждого владельца personal.
+    define has_personal_space: [user]
+
+type space
+  relations
+    # Оба типа пространства записывают space:ID#created@user:* вместе с владельцем.
+    # При повторном создании того же ID общий ключ вызывает конфликт всей записи OpenFGA.
+    define created: [user:*]
+    define owner: [user]
+    # Типы пространства нужны для заполнения и проверки данных. Права ниже сохраняют
+    # прежнюю иерархию ролей, поэтому по этой модели нельзя проверять приватность personal.
+    define personal: [user:*]
+    define shared: [user:*]
+    # Каждая следующая роль включает предыдущую: владелец может выполнять действия admin.
+    define admin: [user] or owner
+    define editor: [user] or admin
+    define viewer: [user] or editor
+
+    # Viewer читает, editor создаёт записи, admin управляет участниками, owner меняет пространство.
+    define can_view: viewer
+    define can_create_note: editor
+    define can_create_reminder: editor
+    define can_manage_members: admin
+    define can_manage_space: owner
+
+type note
+  relations
+    define space: [space]
+    define owner: [user]
+
+    # Прямой владелец записи и пользователи с правами в родительском пространстве
+    # сохраняют прежний доступ на время переноса.
+    define viewer: owner or can_view from space
+    define editor: owner or can_create_note from space
+
+    define can_view: viewer
+    define can_update: editor
+    define can_delete: owner or can_manage_space from space
+
+type reminder
+  relations
+    define space: [space]
+    define owner: [user]
+
+    # Прямой владелец записи и пользователи с правами в родительском пространстве
+    # сохраняют прежний доступ на время переноса.
+    define viewer: owner or can_view from space
+    define editor: owner or can_create_reminder from space
+
+    define can_view: viewer
+    define can_update: editor
+    define can_delete: owner or can_manage_space from space
+    # Остановить напоминание может редактор. Запись при этом сохраняется.
+    define can_stop: owner or editor

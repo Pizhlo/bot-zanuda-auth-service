@@ -20,8 +20,8 @@ func NewAuditor(t *testing.T) *testAudit {
 type testAuditEvent struct {
 }
 
-func (ta *testAudit) Create(ctx context.Context) audit.Event {
-	return &testAuditEvent{}
+func (ta *testAudit) Create(ctx context.Context) (audit.Event, error) {
+	return &testAuditEvent{}, nil
 }
 
 func (ta *testAuditEvent) Append(field internal.Field) {
@@ -35,6 +35,8 @@ func (ta *testAuditEvent) AppendError(err error) {
 
 func (ta *testAuditEvent) WithError(code audit.ErrorCode, kind audit.Kind, err error) {
 }
+
+func (ta *testAuditEvent) End(context.Context) error { return nil }
 
 func (ta *testAuditEvent) Error() string {
 	return ""

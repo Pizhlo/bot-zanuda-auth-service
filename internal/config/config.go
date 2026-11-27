@@ -28,6 +28,9 @@ type Config struct {
 
 // OpenFGA - конфигурация OpenFGA.
 type OpenFGA struct {
+	RequestTimeout time.Duration `yaml:"request_timeout" validate:"required,min=1"` // бюджет одного check/чтения модели или полного чтения tuples
+
+	ModelID            string `yaml:"model_id"`                                // закреплённая существующая модель; несовместимо с apply_model_on_start
 	APIURL             string `yaml:"api_url" validate:"required,url"`         // URL для API OpenFGA
 	AuthorizationModel string `yaml:"authorization_model" validate:"required"` // путь к файлу с моделью авторизации
 	StoreID            string `yaml:"store_id" validate:"omitempty"`           // ID store; если пусто — ищем или создаём по store_name
@@ -64,6 +67,8 @@ type Vault struct {
 
 // AuditConfig - конфигурация аудита.
 type AuditConfig struct {
+	DeliveryTimeout time.Duration `yaml:"delivery_timeout" validate:"required,min=1"` // бюджет доставки завершённого решения
+
 	BrokerEnabled bool   `yaml:"broker_enabled"` // включить отправку в RabbitMQ
 	Topic         string `yaml:"topic"`          // топик для отправки ошибок
 
@@ -144,6 +149,8 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(yamlFile, cfg); err != nil {
 		return nil, fmt.Errorf("config: error unmarshal: %w", err)
 	}
+
+	cfg.setDefaults()
 
 	if cfg.Audit.BrokerEnabled {
 		if err := validateRabbitMQConfig(&cfg.RabbitMQ); err != nil {

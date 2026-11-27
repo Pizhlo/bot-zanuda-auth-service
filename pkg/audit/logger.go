@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"io"
 	"log/slog"
 	"os"
 )
@@ -26,6 +27,10 @@ var levelNames = map[slog.Level]string{
 //
 //nolint:goconst // нет смысла выводить в константы строковые значения.
 func InitLogger() *slog.Logger {
+	return newLogger(os.Stdout)
+}
+
+func newLogger(out io.Writer) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: LevelAudit,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -53,7 +58,7 @@ func InitLogger() *slog.Logger {
 		},
 	}
 
-	handler := slog.NewTextHandler(os.Stdout, opts) // Или NewTextHandler для текста
+	handler := slog.NewTextHandler(out, opts) // Или NewTextHandler для текста
 	logger := slog.New(handler)
 
 	return logger

@@ -11,6 +11,8 @@ import (
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	echoSwagger "github.com/swaggo/echo-swagger"
 )
@@ -56,6 +58,8 @@ type healthHandler interface {
 type resourcesEditor interface {
 	// UpdateResource обновляет ресурс.
 	UpdateResource(c echo.Context) error
+	// CheckDecision проверяет решение.
+	CheckDecision(c echo.Context) error
 }
 
 type notesEditor interface {
@@ -65,8 +69,11 @@ type notesEditor interface {
 }
 
 type middlewareHandler interface {
-	// CheckToken проверяет токен из запроса. Проверяет на expired, а также наличие user_id.
-	CheckToken(next echo.HandlerFunc) echo.HandlerFunc
+	AuditDecision(next echo.HandlerFunc) echo.HandlerFunc
+	AuditNotesFilter(next echo.HandlerFunc) echo.HandlerFunc
+	AuditResourceUpdate(next echo.HandlerFunc) echo.HandlerFunc
+	// CheckToken применяет требования маршрута к сервисному JWT.
+	CheckToken(contract handlerV0.TokenContract) echo.MiddlewareFunc
 }
 
 // Option - опция для настройки сервера.
@@ -174,8 +181,8 @@ func (s *Server) Start(ctx context.Context) error {
 
 func (s *Server) createRoutes() error {
 	e := echo.New()
+	e.HTTPErrorHandler = handlerV0.DecisionHTTPErrorHandler
 
-	// Swagger UI route - must be registered before other middleware
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	skipper := func(c echo.Context) bool {
@@ -183,31 +190,50 @@ func (s *Server) createRoutes() error {
 	}
 
 	e.Use(middleware.RecoverWithConfig(middleware.RecoverConfig{Skipper: skipper}))
-	e.Use(requestLogger())
 
-	e.Use(echoprometheus.NewMiddleware("webserver")) // adds middleware to gather metrics
-	e.GET("/metrics", echoprometheus.NewHandler())   // adds route to serve gathered metrics
+	// Каждый сервер регистрирует собственные HTTP-метрики. Системные и прикладные
+	// метрики глобального реестра также доступны по прежнему маршруту.
+	registry := prometheus.NewRegistry()
+	gatherers := prometheus.Gatherers{prometheus.DefaultGatherer, registry}
+	metrics := promhttp.HandlerFor(gatherers, promhttp.HandlerOpts{DisableCompression: true})
+	e.GET("/metrics", echo.WrapHandler(promhttp.InstrumentMetricHandler(registry, metrics)))
 
 	api := e.Group("api/")
 
 	api.Use(handlerV0.FillCtx)
 
-	// v0
 	apiv0 := api.Group("v0/")
 
 	apiv0.GET("health", s.api.h0.Health)
 
-	// auth
 	auth := apiv0.Group("auth/")
 
 	auth.POST("login", s.api.h0.Login)
 
-	auth.POST("notes/filter", s.api.h0.FilterNotes, s.api.middleware.CheckToken)
+	resourceToken := s.api.middleware.CheckToken(handlerV0.ResourceToken)
+	notes := auth.POST("notes/filter", s.api.h0.FilterNotes, resourceToken)
 
-	// resources
-	resources := apiv0.Group("resources/", s.api.middleware.CheckToken)
+	resources := apiv0.Group("resources/")
+	update := resources.POST("update", s.api.h0.UpdateResource, resourceToken)
+	// Неизвестные пути этой группы проходят ту же проверку токена перед ответом 404.
+	missingResource := resources.RouteNotFound("", echo.NotFoundHandler, resourceToken)
+	missingResourcePath := resources.RouteNotFound("/*", echo.NotFoundHandler, resourceToken)
 
-	resources.POST("update", s.api.h0.UpdateResource)
+	decisions := apiv0.Group("decisions/")
+	check := decisions.POST("check", s.api.h0.CheckDecision, s.api.middleware.CheckToken(handlerV0.DecisionToken))
+
+	// Echo уже выбрал маршрут. Сначала открываем аудит пользовательской операции,
+	// затем выполняем общие middleware, проверку токена и обработчик.
+	e.Use(auditMatchedRequests(map[*echo.Route]echo.MiddlewareFunc{
+		notes:               s.api.middleware.AuditNotesFilter,
+		update:              s.api.middleware.AuditResourceUpdate,
+		missingResource:     s.api.middleware.AuditResourceUpdate,
+		missingResourcePath: s.api.middleware.AuditResourceUpdate,
+		check:               s.api.middleware.AuditDecision,
+	}))
+	e.Use(requestLogger())
+	// Сохраняем префикс webserver_ у опубликованных HTTP-метрик.
+	e.Use(echoprometheus.NewMiddlewareWithConfig(echoprometheus.MiddlewareConfig{Subsystem: "webserver", Registerer: registry}))
 
 	s.e = e
 
@@ -215,10 +241,25 @@ func (s *Server) createRoutes() error {
 		return errors.New("no routes initialized")
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"routes": len(s.e.Routes()),
-		"port":   s.port,
-	}).Info("routes initialized")
+	logrus.WithField("routes", len(e.Routes())).WithField("port", s.port).Info("routes initialized")
 
 	return nil
+}
+
+// auditMatchedRequests запускает аудит операции, выбранной маршрутизатором Echo.
+// Глобальный middleware Echo видит шаблон выбранного маршрута до логирования и метрик.
+// Так отказ до входа в обработчик всё равно завершит событие. Обычный маршрут совпадает
+// по шаблону и HTTP-методу, а RouteNotFound в группе ресурсов принимает любой метод.
+func auditMatchedRequests(routes map[*echo.Route]echo.MiddlewareFunc) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			for route, startAudit := range routes {
+				if route.Path == c.Path() && (route.Method == c.Request().Method || route.Method == echo.RouteNotFound) {
+					return startAudit(next)(c)
+				}
+			}
+
+			return next(c)
+		}
+	}
 }

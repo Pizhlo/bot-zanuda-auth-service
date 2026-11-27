@@ -3,70 +3,67 @@ package main
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:funlen // длинный тест
+//nolint:funlen,paralleltest // Сценарии меняют общие ldflags-переменные и должны выполняться последовательно.
 func TestReadBuildInfo(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
-		name            string
-		version         string
-		buildDate       string
-		gitCommit       string
-		expectName      string
+		name      string
+		version   string
+		buildDate string
+		gitCommit string
+
 		expectVersion   string
 		expectBuildDate string
 		expectGitCommit string
 	}{
 		{
-			name:            "with all build variables set",
-			version:         "v1.2.3",
-			buildDate:       "2024-01-15",
-			gitCommit:       "abc123def456",
-			expectName:      "github.com/example/reviews-backend", // будет заменено на реальный путь
+			name:      "with all build variables set",
+			version:   "v1.2.3",
+			buildDate: "2024-01-15",
+			gitCommit: "abc123def456",
+
 			expectVersion:   "v1.2.3",
 			expectBuildDate: "2024-01-15",
 			expectGitCommit: "abc123def456",
 		},
 		{
-			name:            "with empty build variables",
-			version:         "",
-			buildDate:       "",
-			gitCommit:       "",
-			expectName:      "github.com/example/reviews-backend", // будет заменено на реальный путь
+			name:      "with empty build variables",
+			version:   "",
+			buildDate: "",
+			gitCommit: "",
+
 			expectVersion:   "(devel)",
 			expectBuildDate: "",
 			expectGitCommit: "",
 		},
 		{
-			name:            "with only git commit",
-			version:         "",
-			buildDate:       "",
-			gitCommit:       "abc123def456",
-			expectName:      "github.com/example/reviews-backend", // будет заменено на реальный путь
-			expectVersion:   "abc123d",                            // первые 7 символов
+			name:      "with only git commit",
+			version:   "",
+			buildDate: "",
+			gitCommit: "abc123def456",
+
+			expectVersion:   "abc123d", // первые 7 символов
 			expectBuildDate: "",
 			expectGitCommit: "abc123def456",
 		},
 		{
-			name:            "with only build date",
-			version:         "",
-			buildDate:       "2024-01-15",
-			gitCommit:       "",
-			expectName:      "github.com/example/reviews-backend", // будет заменено на реальный путь
+			name:      "with only build date",
+			version:   "",
+			buildDate: "2024-01-15",
+			gitCommit: "",
+
 			expectVersion:   "2024-01-15",
 			expectBuildDate: "2024-01-15",
 			expectGitCommit: "",
 		},
 		{
-			name:            "with git commit and build date",
-			version:         "",
-			buildDate:       "2024-01-15",
-			gitCommit:       "abc123def456",
-			expectName:      "github.com/example/reviews-backend", // будет заменено на реальный путь
+			name:      "with git commit and build date",
+			version:   "",
+			buildDate: "2024-01-15",
+			gitCommit: "abc123def456",
+
 			expectVersion:   "abc123d-2024-01-15",
 			expectBuildDate: "2024-01-15",
 			expectGitCommit: "abc123def456",
@@ -75,8 +72,6 @@ func TestReadBuildInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
 			// Сохраняем оригинальные значения
 			originalVersion, originalBuildDate, originalGitCommit := getBuildVars(t)
 
@@ -92,9 +87,9 @@ func TestReadBuildInfo(t *testing.T) {
 
 			// Проверяем, что Name содержит путь к модулю (может быть разным в разных окружениях)
 			require.NotEmpty(t, result.Name, "Expected non-empty Name")
-			assert.Equal(t, tt.expectVersion, result.Version)
-			assert.Equal(t, tt.expectBuildDate, result.BuildDate)
-			assert.Equal(t, tt.expectGitCommit, result.GitCommit)
+			require.Equal(t, tt.expectVersion, result.Version)
+			require.Equal(t, tt.expectBuildDate, result.BuildDate)
+			require.Equal(t, tt.expectGitCommit, result.GitCommit)
 		})
 	}
 }
@@ -155,63 +150,6 @@ func TestFallbackVersion(t *testing.T) {
 			version:  "   ",
 			expected: "(devel)",
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			// Сохраняем оригинальные значения
-			originalVersion, originalBuildDate, originalGitCommit := getBuildVars(t)
-
-			// Устанавливаем тестовые значения
-			setBuildVars(t, tt.version, tt.buildDate, tt.gitCommit)
-
-			// Восстанавливаем оригинальные значения после теста
-			defer setBuildVars(t, originalVersion, originalBuildDate, originalGitCommit)
-
-			result := fallbackVersion(tt.version, tt.buildDate, tt.gitCommit)
-
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestReadBuildInfoWithDebugInfo(t *testing.T) {
-	t.Parallel()
-
-	// Этот тест проверяет, что функция корректно работает с debug.ReadBuildInfo()
-	// В реальном окружении debug.ReadBuildInfo() должна возвращать информацию о модуле
-
-	// Сохраняем оригинальные значения
-	originalVersion, originalBuildDate, originalGitCommit := getBuildVars(t)
-
-	// Устанавливаем тестовые значения
-	setBuildVars(t, "v1.0.0", "2024-01-15", "abc123def456")
-
-	// Восстанавливаем оригинальные значения после теста
-	defer setBuildVars(t, originalVersion, originalBuildDate, originalGitCommit)
-
-	result := ReadBuildInfo()
-
-	require.NotNil(t, result, "ReadBuildInfo() returned nil")
-
-	assert.NotEmpty(t, result.Name)
-	assert.Equal(t, "v1.0.0", result.Version)
-	assert.Equal(t, "2024-01-15", result.BuildDate)
-	assert.Equal(t, "abc123def456", result.GitCommit)
-}
-
-func TestFallbackVersionEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name      string
-		version   string
-		buildDate string
-		gitCommit string
-		expected  string
-	}{
 		{
 			name:      "very long git commit",
 			version:   "",
@@ -246,18 +184,9 @@ func TestFallbackVersionEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			// Сохраняем оригинальные значения
-			originalVersion, originalBuildDate, originalGitCommit := getBuildVars(t)
-
-			// Устанавливаем тестовые значения
-			setBuildVars(t, tt.version, tt.buildDate, tt.gitCommit)
-
-			// Восстанавливаем оригинальные значения после теста
-			defer setBuildVars(t, originalVersion, originalBuildDate, originalGitCommit)
-
 			result := fallbackVersion(tt.version, tt.buildDate, tt.gitCommit)
 
-			assert.Equal(t, tt.expected, result)
+			require.Equal(t, tt.expected, result)
 		})
 	}
 }

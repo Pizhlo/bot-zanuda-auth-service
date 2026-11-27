@@ -2,6 +2,7 @@
 package model
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
@@ -155,4 +156,72 @@ func TestFormatEventType(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestEqual(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.New()
+
+	owner := Resource{Type: ResourceTypeUser, ID: id}
+	for _, tt := range []struct {
+		name  string
+		other Resource
+		equal bool
+	}{
+		{"same identity", Resource{Type: ResourceTypeUser, ID: id}, true},
+		{"attributes are not identity", Resource{Type: ResourceTypeUser, ID: id, Attributes: map[string]any{"name": "changed"}}, true},
+		{"different type", Resource{Type: ResourceTypeSpace, ID: id}, false},
+		{"different uuid", Resource{Type: ResourceTypeUser, ID: uuid.New()}, false},
+		{"empty", Resource{}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tt.equal, owner.Equal(tt.other))
+
+			require.Equal(t, tt.equal, tt.other.Equal(owner))
+		})
+	}
+}
+
+func TestParseResourceIdentity(t *testing.T) {
+	t.Parallel()
+
+	id := uuid.MustParse("f3172ef4-9df7-4d96-b386-3cc00f6572dc")
+
+	for _, tc := range []struct {
+		name, raw string
+		want      Resource
+		wantErr   require.ErrorAssertionFunc
+	}{
+		{"valid identity", "user:" + id.String(), Resource{Type: ResourceTypeUser, ID: id}, require.NoError},
+		{"missing identity", "", Resource{}, require.Error},
+		{"missing kind", ":" + id.String(), Resource{}, require.Error},
+		{"wildcard", "user:*", Resource{}, require.Error},
+		{"invalid UUID", "user:bad", Resource{}, require.Error},
+		{"zero UUID", "user:" + uuid.Nil.String(), Resource{}, require.Error},
+		{"userset", "space:" + id.String() + "#viewer", Resource{}, require.Error},
+		{"UUID without dashes", "user:f3172ef49df74d96b3863cc00f6572dc", Resource{}, require.Error},
+		{"uppercase UUID", "user:F3172EF4-9DF7-4D96-B386-3CC00F6572DC", Resource{}, require.Error},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := ParseResourceIdentity(tc.raw)
+			tc.wantErr(t, err)
+
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestUpdateResourceResponse(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(UpdateResourceResponse{})
+	require.NoError(t, err)
+
+	require.Contains(t, string(data), `"auth_model_id"`)
+	require.NotContains(t, string(data), `"authorization_model_id"`)
 }

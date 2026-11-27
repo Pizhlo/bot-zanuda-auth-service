@@ -2,21 +2,34 @@
 package fga
 
 import (
-	"testing"
-
 	"auth-service/internal/model"
+	"testing"
 
 	"github.com/google/uuid"
 	openFGAClient "github.com/openfga/go-sdk/client"
 	"github.com/stretchr/testify/require"
 )
 
-func TestToOpenFGAWriteRequest_CreateNote(t *testing.T) {
+func TestToOpenFGAWriteRequest(t *testing.T) {
 	t.Parallel()
 
 	noteID := uuid.New()
 	spaceID := uuid.New()
 	ownerID := uuid.New()
+
+	user, object := "user:"+ownerID.String(), "space:"+spaceID.String()
+	ownerTuple := openFGAClient.ClientTupleKey{Object: object, Relation: "owner", User: user}
+	marker := func(kind string) openFGAClient.ClientTupleKey {
+		return openFGAClient.ClientTupleKey{Object: object, Relation: kind, User: "user:*"}
+	}
+	spaceRequest := func(kind any) model.UpdateResourceRequest {
+		return model.UpdateResourceRequest{
+			Resource:  model.Resource{ID: spaceID, Type: model.ResourceTypeSpace, Attributes: map[string]any{model.AttributeSpaceType: kind}},
+			Relations: model.Relation{Owner: model.Resource{ID: ownerID, Type: model.ResourceTypeUser}},
+			Operation: model.OperationCreate, ChangeType: model.ChangeTypeResourceAdded,
+		}
+	}
+	wantPrivacyError := func(t require.TestingT, err error, _ ...any) { require.ErrorIs(t, err, ErrSpacePrivacy) }
 
 	tests := []struct {
 		name    string
@@ -24,6 +37,23 @@ func TestToOpenFGAWriteRequest_CreateNote(t *testing.T) {
 		want    openFGAClient.ClientWriteRequest
 		wantErr require.ErrorAssertionFunc
 	}{
+		{
+			name: "personal space reserves UUID and owner in one write",
+			req:  spaceRequest("personal"),
+			want: openFGAClient.ClientWriteRequest{Writes: []openFGAClient.ClientTupleKey{
+				ownerTuple, marker("created"), marker("personal"), {Object: user, Relation: "has_personal_space", User: user},
+			}},
+			wantErr: require.NoError,
+		},
+		{
+			name:    "shared space reserves UUID in same write",
+			req:     spaceRequest("shared"),
+			want:    openFGAClient.ClientWriteRequest{Writes: []openFGAClient.ClientTupleKey{ownerTuple, marker("created"), marker("shared")}},
+			wantErr: require.NoError,
+		},
+		{name: "unknown space type", req: spaceRequest("bad"), wantErr: wantPrivacyError},
+		{name: "empty space type", req: spaceRequest(""), wantErr: wantPrivacyError},
+		{name: "non-string space type", req: spaceRequest(42), wantErr: wantPrivacyError},
 		{
 			name: "create note",
 			req: model.UpdateResourceRequest{
@@ -69,6 +99,7 @@ func TestToOpenFGAWriteRequest_CreateNote(t *testing.T) {
 
 			fgaReq, err := toOpenFGAWriteRequest(tt.req)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.want, fgaReq)
 		})
 	}
@@ -82,11 +113,10 @@ func TestTuplesFromRequest(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		req         model.UpdateResourceRequest
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		req        model.UpdateResourceRequest
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name: "create note",
@@ -113,6 +143,17 @@ func TestTuplesFromRequest(t *testing.T) {
 			wantErr: require.NoError,
 		},
 		{
+			name: "space cannot have a parent",
+			req: model.UpdateResourceRequest{
+				Resource:  model.Resource{ID: spaceID, Type: model.ResourceTypeSpace},
+				Operation: model.OperationCreate,
+				Relations: model.Relation{Parent: model.Resource{ID: noteID, Type: model.ResourceTypeNote}},
+			},
+			wantErr: func(t require.TestingT, err error, _ ...any) {
+				require.ErrorContains(t, err, "does not support parent relation")
+			},
+		},
+		{
 			name: "unknown operation",
 			req: model.UpdateResourceRequest{
 				Resource:  model.Resource{ID: noteID, Type: model.ResourceTypeNote},
@@ -129,10 +170,10 @@ func TestTuplesFromRequest(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesFromRequest(tt.req)
+			writes, err := tuplesFromRequest(tt.req)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }
@@ -146,12 +187,11 @@ func TestTuplesForCreate(t *testing.T) {
 	ownerID := uuid.New()
 
 	tests := []struct {
-		name        string
-		resource    model.Resource
-		relations   model.Relation
-		wantWrites  []openFGAClient.ClientTupleKey
-		wantDeletes []openFGAClient.ClientTupleKeyWithoutCondition
-		wantErr     require.ErrorAssertionFunc
+		name       string
+		resource   model.Resource
+		relations  model.Relation
+		wantWrites []openFGAClient.ClientTupleKey
+		wantErr    require.ErrorAssertionFunc
 	}{
 		{
 			name:     "create note with owner and parent",
@@ -249,10 +289,10 @@ func TestTuplesForCreate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			writes, deletes, err := tuplesForCreate(tt.resource, tt.relations)
+			writes, err := tuplesForCreate(tt.resource, tt.relations)
 			tt.wantErr(t, err)
+
 			require.Equal(t, tt.wantWrites, writes)
-			require.Equal(t, tt.wantDeletes, deletes)
 		})
 	}
 }

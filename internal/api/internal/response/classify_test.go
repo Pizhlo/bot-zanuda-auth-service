@@ -22,12 +22,22 @@ func TestClassify(t *testing.T) {
 		want classification
 	}{
 		{
-			name: "ErrResounceAlreadyExistsOrNotFound",
-			err:  fga.ErrResounceAlreadyExistsOrNotFound,
+			name: "space privacy",
+			err:  fga.ErrSpacePrivacy,
+			want: classification{StatusCode: http.StatusBadRequest, Code: audit.ErrCodeValidationFailed, Message: "invalid space privacy operation"},
+		},
+		{
+			name: "wrapped space privacy hides private details",
+			err:  fmt.Errorf("private context: %w", fga.ErrSpacePrivacy),
+			want: classification{StatusCode: http.StatusBadRequest, Code: audit.ErrCodeValidationFailed, Message: "invalid space privacy operation"},
+		},
+		{
+			name: "ErrResourceAlreadyExistsOrNotFound",
+			err:  fga.ErrResourceAlreadyExistsOrNotFound,
 			want: classification{
 				StatusCode: http.StatusConflict,
 				Code:       audit.ErrCodeResourceAlreadyExistsOrNotFound,
-				Message:    fga.ErrResounceAlreadyExistsOrNotFound.Error(),
+				Message:    fga.ErrResourceAlreadyExistsOrNotFound.Error(),
 			},
 		},
 		{

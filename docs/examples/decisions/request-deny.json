@@ -1,0 +1,38 @@
+{
+  "request_id": "5dd9cb63-5c64-4c27-b9f8-c9d9be3bb67e",
+  "subject": {
+    "type": "user",
+    "id": "5b455ab4-1f63-40f6-83c8-302db5a61c73",
+    "attributes": {
+      "telegram_user_id": "123456789"
+    }
+  },
+  "action": {
+    "name": "update",
+    "attributes": {
+      "field_mask": [
+        "text",
+        "title",
+        "timestamp"
+      ]
+    }
+  },
+  "resource": {
+    "type": "note",
+    "id": "89a04b2d-6c4c-4d53-a8e5-f0786539d2a0",
+    "attributes": {
+      "space_id": "db2483d1-c55d-4684-ad48-8ed4ab382015"
+    }
+  },
+  "context": {
+    "service": "web-server",
+    "client": "telegram-bot",
+    "ip": "10.0.0.15",
+    "trace_id": "4f6b2d9f0c1a",
+    "time": "2026-06-13T14:00:00Z"
+  },
+  "options": {
+    "include_reasons": true,
+    "consistency": "minimize_latency"
+  }
+}

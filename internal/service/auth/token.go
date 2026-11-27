@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"auth-service/internal/service/internal"
 	"auth-service/pkg/audit"
 	"context"
 	"errors"
@@ -13,9 +12,8 @@ import (
 )
 
 const (
-	messageTokenValidationFailed = "failed to validate token"
-	messageNoPrefixBearer        = "invalid token: no prefix Bearer"
-	messageEmptyBearerToken      = "invalid token: empty bearer token"
+	messageNoPrefixBearer   = "invalid token: no prefix Bearer"
+	messageEmptyBearerToken = "invalid token: empty bearer token"
 )
 
 var (
@@ -25,66 +23,57 @@ var (
 
 // CheckToken проверяет токен на валидность: поле exp и наличие payload.
 func (s *Service) CheckToken(ctx context.Context, authHeader string) (*jwt.Token, error) {
-	operationCheckToken := fmt.Sprintf("%s.%s", serviceName, "check_token")
-
-	ctx = internal.WithOperation(ctx, operationCheckToken)
-
-	event := s.auditor.Create(fillCtx(ctx))
-	defer internal.WithPanicRecovery(ctx, event)()
-
 	logrus.Debug("checking token")
+
+	reject := func(public, reason error) (*jwt.Token, error) {
+		audit.FromContext(ctx).Fail(audit.ErrCodeTokenInvalid, audit.KindValidation, audit.ErrLevelWarn, audit.MessageTokenVerificationFailed, reason)
+		return nil, public
+	}
 
 	scheme, tokenString, ok := strings.Cut(authHeader, " ")
 	if !ok || !strings.EqualFold(scheme, "Bearer") {
-		event.WithError(audit.ErrCodeTokenInvalid, audit.KindValidation, errors.New(messageNoPrefixBearer))
-		event.Append(audit.Message(messageNoPrefixBearer))
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return nil, errors.New(messageNoPrefixBearer)
+		err := errors.New(messageNoPrefixBearer)
+		return reject(err, err)
 	}
 
 	tokenString = strings.TrimSpace(tokenString)
 	if tokenString == "" {
-		event.WithError(audit.ErrCodeTokenInvalid, audit.KindValidation, errors.New(messageEmptyBearerToken))
-		event.Append(audit.Message(messageEmptyBearerToken))
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return nil, errors.New(messageEmptyBearerToken)
+		err := errors.New(messageEmptyBearerToken)
+		return reject(err, err)
 	}
 
 	token, claims, err := s.parseToken(tokenString)
 	if err != nil {
-		var errCode audit.ErrorCode
-
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			errCode = audit.ErrCodeTokenExpired
-		} else {
-			errCode = audit.ErrCodeTokenInvalid
-		}
-
-		event.WithError(errCode, audit.KindValidation, err)
-		event.Append(audit.Message(messageTokenValidationFailed))
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return nil, errors.New("invalid token")
+		return reject(ErrInvalidToken, tokenAuditCause(err))
 	}
 
-	err = validateIAT(claims, event)
+	err = validateIAT(claims)
 	if err != nil {
-		return nil, err
+		return reject(ErrInvalidToken, err)
 	}
 
 	if !token.Valid {
 		err := errors.New("token invalid")
-
-		event.Append(audit.Message(messageTokenValidationFailed))
-		event.WithError(audit.ErrCodeTokenInvalid, audit.KindValidation, err)
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return nil, err
+		return reject(err, err)
 	}
 
 	return token, nil
+}
+
+// tokenAuditCause сохраняет диагностику проверенных claims. Ошибки разбора
+// неподписанных данных могут содержать введённые клиентом строки, например alg.
+func tokenAuditCause(err error) error {
+	if errors.Is(err, jwt.ErrTokenInvalidClaims) {
+		return err
+	}
+
+	for _, reason := range []error{jwt.ErrTokenSignatureInvalid, jwt.ErrTokenMalformed, jwt.ErrTokenUnverifiable} {
+		if errors.Is(err, reason) {
+			return reason
+		}
+	}
+
+	return ErrInvalidToken
 }
 
 // parseToken парсит и валидирует JWT с claims.
@@ -112,71 +101,17 @@ func (s *Service) parseToken(tokenString string) (*jwt.Token, jwt.MapClaims, err
 }
 
 // validateIAT проверяет наличие и значение iat.
-func validateIAT(claims jwt.MapClaims, event audit.Event) error {
+func validateIAT(claims jwt.MapClaims) error {
 	iat, err := claims.GetIssuedAt()
 	if err != nil {
-		event.WithError(audit.ErrCodeTokenInvalid, audit.KindValidation, err)
-		event.Append(audit.Message(messageTokenValidationFailed))
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return ErrInvalidToken
+		return err
 	}
 
 	if iat == nil {
-		errMissing := fmt.Errorf("%w: %s", jwt.ErrTokenRequiredClaimMissing, "iat claim is required")
-
-		event.WithError(audit.ErrCodeTokenInvalid, audit.KindValidation, errMissing)
-		event.AppendContext(audit.EventContext{"iat": "iat claim is required"})
-		event.Append(audit.Message(messageTokenValidationFailed))
-		event.Append(audit.Level(audit.ErrLevelWarn))
-
-		return ErrInvalidToken
+		return fmt.Errorf("%w: iat claim is required", jwt.ErrTokenRequiredClaimMissing)
 	}
 
 	return nil
-}
-
-func fillCtx(ctx context.Context) context.Context {
-	ctx = internal.WithServiceName(ctx)
-
-	return ctx
-}
-
-// TokenValidationFailedHook создает событие о невалидности токена.
-func TokenValidationFailedHook(ctx context.Context, stash audit.Stash) audit.Stash {
-	if serviceName, ok := ctx.Value(internal.ServiceNameKey{}).(string); ok {
-		stash = stash.Append(audit.ServiceName(serviceName))
-	}
-
-	if message, ok := ctx.Value(internal.MessageKey{}).(string); ok {
-		stash = stash.Append(audit.Message(message))
-	}
-
-	if level, ok := ctx.Value(internal.LevelKey{}).(audit.ErrorLevel); ok {
-		stash = stash.Append(audit.Level(level))
-	}
-
-	if errorCode, ok := ctx.Value(internal.ErrorCodeKey{}).(audit.ErrorCode); ok {
-		stash = stash.Append(audit.ErrorCodeField(errorCode))
-	}
-
-	if messageCtx, ok := ctx.Value(internal.MessageContextKey{}).(audit.EventContext); ok {
-		stash = stash.Append(audit.ContextField(messageCtx, stash))
-	}
-
-	if userID, ok := ctx.Value(internal.UserIDKey{}).(string); ok {
-		stash = stash.Append(audit.UserID(userID))
-	}
-
-	if operation, ok := ctx.Value(internal.OperationKey{}).(string); ok {
-		stash = stash.Append(audit.Operation(operation))
-	}
-
-	if kind, ok := ctx.Value(internal.KindKey{}).(audit.Kind); ok {
-		stash = stash.Append(audit.KindField(kind))
-	}
-
-	return stash
 }
 
 // GetPayload возвращает информацию токена в виде map[string]any.

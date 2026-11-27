@@ -2,14 +2,14 @@ package auth
 
 import (
 	"auth-service/internal/service/auth/mocks"
-	serviceinternal "auth-service/internal/service/internal"
 	"auth-service/pkg/audit"
-	"auth-service/pkg/audit/testaudit"
-	"context"
-	"reflect"
+	"bytes"
+	"cmp"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/golang/mock/gomock"
@@ -17,15 +17,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//nolint:funlen,dupl // длинный тест - ничего страшного; похожие тест-кейсы
+//nolint:funlen // длинный тест - ничего страшного; похожие тест-кейсы
 func TestCheckToken(t *testing.T) {
 	t.Parallel()
 
 	type test struct {
-		name  string
-		token string
-		want  jwt.MapClaims
-		check func(err error, tt test, token *jwt.Token)
+		name         string
+		token        string
+		headerPrefix string
+		cause        string
+		want         jwt.MapClaims
+		wantErr      require.ErrorAssertionFunc
+		check        func(*testing.T, jwt.MapClaims, *jwt.Token)
 	}
 
 	now := time.Now()
@@ -119,10 +122,23 @@ func TestCheckToken(t *testing.T) {
 		},
 	}, []byte("secret"))
 
+	checkValid := func(t *testing.T, claims jwt.MapClaims, token *jwt.Token) {
+		t.Helper()
+		require.NotNil(t, token)
+		require.True(t, token.Valid)
+		require.Equal(t, "HS256", token.Method.Alg())
+		require.Equal(t, claims, token.Claims)
+	}
+	checkMissing := func(t *testing.T, _ jwt.MapClaims, token *jwt.Token) { t.Helper(); require.Nil(t, token) }
+	wantError := func(message string) require.ErrorAssertionFunc {
+		return func(t require.TestingT, err error, _ ...any) { require.EqualError(t, err, message) }
+	}
+
 	tests := []test{
 		{
-			name:  "positive case (uppercase)",
-			token: "Bearer " + token,
+			name:         "positive case (uppercase)",
+			headerPrefix: "Bearer ",
+			token:        token,
 			want: jwt.MapClaims{
 				"scope": "bot",
 				"iss":   "test",
@@ -131,17 +147,13 @@ func TestCheckToken(t *testing.T) {
 				"iat":   float64(jwt.NewNumericDate(now).Unix()),
 				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
 			},
-			check: func(err error, tt test, token *jwt.Token) {
-				require.NoError(t, err)
-				require.NotNil(t, token)
-				assert.True(t, token.Valid)
-				assert.Equal(t, "HS256", token.Method.Alg())
-				assert.Equal(t, tt.want, token.Claims)
-			},
+			wantErr: require.NoError,
+			check:   checkValid,
 		},
 		{
-			name:  "positive case (lowercase)",
-			token: "bearer " + token,
+			name:         "positive case (lowercase)",
+			headerPrefix: "bearer ",
+			token:        token,
 			want: jwt.MapClaims{
 				"scope": "bot",
 				"iss":   "test",
@@ -150,34 +162,28 @@ func TestCheckToken(t *testing.T) {
 				"iat":   float64(jwt.NewNumericDate(now).Unix()),
 				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
 			},
-			check: func(err error, tt test, token *jwt.Token) {
-				require.NoError(t, err)
-				require.NotNil(t, token)
-				assert.True(t, token.Valid)
-				assert.Equal(t, "HS256", token.Method.Alg())
-				assert.Equal(t, tt.want, token.Claims)
-			},
+			wantErr: require.NoError,
+			check:   checkValid,
 		},
 		{
-			name:  "error case: invalid token",
-			token: "Bearer invalid",
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: invalid token",
+			cause:        "token is malformed",
+			headerPrefix: "Bearer ",
+			token:        "malformed-fixture-token",
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: expired",
-			token: "Bearer " + expiredToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: expired",
+			cause:        "token has invalid claims: token is expired",
+			headerPrefix: "Bearer ",
+			token:        expiredToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
 			name:  "error case: no 'Bearer' prefix",
+			cause: "invalid token: no prefix Bearer",
 			token: token,
 			want: jwt.MapClaims{
 				"scope": "bot",
@@ -187,74 +193,63 @@ func TestCheckToken(t *testing.T) {
 				"iat":   float64(jwt.NewNumericDate(now).Unix()),
 				"exp":   float64(jwt.NewNumericDate(now.Add(tokenDuration)).Unix()),
 			},
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token: no prefix Bearer")
-				assert.Nil(t, token)
-			},
+			wantErr: wantError("invalid token: no prefix Bearer"),
+			check:   checkMissing,
 		},
 		{
-			name:  "error case: empty token",
-			token: "Bearer ",
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token: empty bearer token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: empty token",
+			cause:        "invalid token: empty bearer token",
+			headerPrefix: "Bearer ",
+			wantErr:      wantError("invalid token: empty bearer token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: another method token",
-			token: "Bearer " + anotherMethodToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: another method token",
+			cause:        "token signature is invalid",
+			headerPrefix: "Bearer ",
+			token:        anotherMethodToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: unsigned token",
-			token: "Bearer " + unsignedToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: unsigned token",
+			cause:        "token signature is invalid",
+			headerPrefix: "Bearer ",
+			token:        unsignedToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: no issuer",
-			token: "Bearer " + noIssuerToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: no issuer",
+			cause:        "token has invalid claims: token is missing required claim: iss claim is required",
+			headerPrefix: "Bearer ",
+			token:        noIssuerToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: no audience",
-			token: "Bearer " + noAudienceToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: no audience",
+			cause:        "token has invalid claims: token is missing required claim: aud claim is required",
+			headerPrefix: "Bearer ",
+			token:        noAudienceToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: no expired",
-			token: "Bearer " + noExpiredToken,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: no expired",
+			cause:        "token has invalid claims: token is missing required claim: exp claim is required",
+			headerPrefix: "Bearer ",
+			token:        noExpiredToken,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 		{
-			name:  "error case: no iat",
-			token: "Bearer " + tokenWithoutIat,
-			check: func(err error, tt test, token *jwt.Token) {
-				require.Error(t, err)
-				assert.EqualError(t, err, "invalid token")
-				assert.Nil(t, token)
-			},
+			name:         "error case: no iat",
+			cause:        "token is missing required claim: iat claim is required",
+			headerPrefix: "Bearer ",
+			token:        tokenWithoutIat,
+			wantErr:      wantError("invalid token"),
+			check:        checkMissing,
 		},
 	}
 
@@ -263,8 +258,43 @@ func TestCheckToken(t *testing.T) {
 			t.Parallel()
 
 			auth := createTestAuthService(t, []byte("secret"), nil)
-			token, err := auth.CheckToken(t.Context(), tt.token)
-			tt.check(err, tt, token)
+
+			var output bytes.Buffer
+
+			ctx, attempt, err := audit.Begin(t.Context(), audit.NewAuditor(audit.WithOutput(&output)), audit.OperationFilterNotes, audit.StageAuthenticate.String())
+			require.NoError(t, err)
+
+			token, err := auth.CheckToken(ctx, tt.headerPrefix+tt.token)
+			tt.wantErr(t, err)
+
+			attempt.Finish(ctx, &err)
+
+			tt.check(t, tt.want, token)
+			require.Equal(t, tt.cause != "", strings.Contains(output.String(), "cause="))
+			require.Contains(t, output.String(), tt.cause)
+			require.Equal(t, tt.cause != "", strings.Contains(output.String(), "level=warn"))
+			// Пустой Bearer не содержит JWT; проверяем отсутствие самого заголовка.
+			require.NotContains(t, output.String(), cmp.Or(tt.token, tt.headerPrefix))
+		})
+	}
+}
+
+func TestTokenAuditCause(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		err, want error
+	}{
+		{"signed claims", errors.Join(jwt.ErrTokenInvalidClaims, jwt.ErrTokenExpired), errors.Join(jwt.ErrTokenInvalidClaims, jwt.ErrTokenExpired)},
+		{"signature", fmt.Errorf("%w: untrusted alg", jwt.ErrTokenSignatureInvalid), jwt.ErrTokenSignatureInvalid},
+		{"malformed", fmt.Errorf("%w: untrusted input", jwt.ErrTokenMalformed), jwt.ErrTokenMalformed},
+		{"unverifiable", fmt.Errorf("%w: untrusted key", jwt.ErrTokenUnverifiable), jwt.ErrTokenUnverifiable},
+		{"unknown", errors.New("private error"), ErrInvalidToken},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.EqualError(t, tokenAuditCause(tc.err), tc.want.Error())
 		})
 	}
 }
@@ -512,7 +542,7 @@ func TestValidateIAT(t *testing.T) {
 			claims: jwt.MapClaims{},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrInvalidToken)
+				require.ErrorIs(t, err, jwt.ErrTokenRequiredClaimMissing)
 			},
 		},
 		{
@@ -522,7 +552,7 @@ func TestValidateIAT(t *testing.T) {
 			},
 			wantErr: func(t require.TestingT, err error, i ...interface{}) {
 				require.Error(t, err)
-				require.ErrorIs(t, err, ErrInvalidToken)
+				require.ErrorIs(t, err, jwt.ErrInvalidType)
 			},
 		},
 	}
@@ -531,91 +561,15 @@ func TestValidateIAT(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			event := testaudit.NewAuditor(t).Create(t.Context())
-
-			err := validateIAT(tt.claims, event)
+			err := validateIAT(tt.claims)
 			tt.wantErr(t, err)
 		})
 	}
 }
 
-func TestTokenValidationFailedHook(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	ctx = serviceinternal.WithServiceName(ctx)
-	ctx = serviceinternal.WithMessage(ctx, "failed to validate token")
-	ctx = serviceinternal.WithLevel(ctx, audit.ErrLevelWarn)
-	ctx = serviceinternal.WithErrorCode(ctx, audit.ErrCodeTokenInvalid)
-	ctx = serviceinternal.WithMessageCtx(ctx, audit.EventContext{"ip_address": "127.0.0.1"})
-	ctx = serviceinternal.WithUserID(ctx, "user-1")
-	ctx = serviceinternal.WithOperation(ctx, "auth-service.check_token")
-	ctx = serviceinternal.WithKind(ctx, audit.KindValidation)
-
-	var captured audit.Stash
-
-	auditor := audit.NewAuditor(
-		audit.WithHook(TokenValidationFailedHook),
-		audit.WithHook(func(ctx context.Context, stash audit.Stash) audit.Stash {
-			captured = stash
-			return stash
-		}),
-	)
-
-	_ = auditor.Create(ctx)
-	values := stashValues(captured)
-
-	require.Contains(t, values, "auth-service")
-	require.Contains(t, values, "failed to validate token")
-	require.Contains(t, values, audit.ErrLevelWarn)
-	require.Contains(t, values, audit.ErrCodeTokenInvalid)
-	require.Contains(t, values, "user-1")
-	require.Contains(t, values, "auth-service.check_token")
-	require.Contains(t, values, audit.KindValidation)
-	require.True(t, containsByDeepEqual(values, audit.EventContext{"ip_address": "127.0.0.1"}))
-}
-
-func stashValues(stash audit.Stash) []any {
-	v := reflect.ValueOf(&stash).Elem()
-
-	fields := v.FieldByName("fields")
-	if !fields.IsValid() || fields.IsNil() {
-		return nil
-	}
-
-	// Поле неэкспортируемое, поэтому читаем его через unsafe для теста.
-	fields = reflect.NewAt(fields.Type(), unsafe.Pointer(fields.UnsafeAddr())).Elem()
-
-	values := make([]any, 0, fields.Len())
-
-	iter := fields.MapRange()
-	for iter.Next() {
-		fieldValue := iter.Value()
-		fieldIface := fieldValue.Interface()
-
-		valueField := reflect.ValueOf(fieldIface).FieldByName("Value")
-		if valueField.IsValid() && valueField.CanInterface() {
-			values = append(values, valueField.Interface())
-		}
-	}
-
-	return values
-}
-
-func containsByDeepEqual(values []any, want any) bool {
-	for _, v := range values {
-		if reflect.DeepEqual(v, want) {
-			return true
-		}
-	}
-
-	return false
-}
-
 type mockMocks struct {
 	mockVaultClient *mocks.MockvaultClient
 	mockStorage     *mocks.Mockstorage
-	mockAuditor     auditor
 }
 
 func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *testing.T, m *mockMocks)) *Service {
@@ -627,12 +581,10 @@ func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *te
 
 	mockVaultClient := mocks.NewMockvaultClient(ctrl)
 	mockStorage := mocks.NewMockstorage(ctrl)
-	mockAuditor := testaudit.NewAuditor(t)
 
 	m := &mockMocks{
 		mockVaultClient: mockVaultClient,
 		mockStorage:     mockStorage,
-		mockAuditor:     mockAuditor,
 	}
 
 	if setupMocks != nil {
@@ -646,7 +598,6 @@ func createTestAuthService(t *testing.T, secretKey []byte, setupMocks func(t *te
 		WithStorage(mockStorage),
 		WithIssuer("test"),
 		WithTokenDuration(time.Second),
-		WithAuditor(mockAuditor),
 	)
 	require.NoError(t, err)
 

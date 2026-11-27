@@ -71,3 +71,10 @@ type SpaceMember struct {
 func (m SpaceMember) CanEditSpaceNote() bool {
 	return m.RoleCode != ViewerRoleCode
 }
+
+// IsOwner распознаёт защищённую роль владельца на границе старого SQL-контракта
+// (OWNER) и строчного представления отношений OpenFGA (owner). Это не проверка
+// наличия права: фактический владелец определяется по сохранённым отношениям.
+func (r RoleCode) IsOwner() bool {
+	return r == OwnerRoleCode || r == RoleCode(RelationTypeOwner)
+}
